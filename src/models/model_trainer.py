@@ -2,8 +2,9 @@ import os
 import torch
 import torch.optim as optim
 import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
-from utils.logger import get_logger
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from logger import get_logger
+from utils.data_loader import get_data_loader
 
 class ModelTrainer:
     """
@@ -19,32 +20,25 @@ class ModelTrainer:
         self.saved_models_dir = saved_models_dir
         os.makedirs(self.saved_models_dir, exist_ok=True)
 
-    def train(self, X_train, y_train, X_val, y_val):
+    def train(self, X_train, y_train, X_val, y_val, model_name='model', hyperparameters="default"):
         """
         Trains the model using the provided data and logs training metrics.
-
-        Returns:
-            trained_model (nn.Module): The trained model.
-            training_history (dict): Dictionary containing training and validation loss history.
         """
-        # Prepare data loaders
-        train_dataset = TensorDataset(torch.tensor(X_train, dtype=torch.float32), torch.tensor(y_train, dtype=torch.float32))
-        val_dataset = TensorDataset(torch.tensor(X_val, dtype=torch.float32), torch.tensor(y_val, dtype=torch.float32))
+        train_loader = get_data_loader(X_train, y_train, batch_size=self.batch_size, shuffle=True)
+        val_loader = get_data_loader(X_val, y_val, batch_size=self.batch_size, shuffle=False)
 
-        train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
-        val_loader = DataLoader(val_dataset, batch_size=self.batch_size)
-
-        # Define loss and optimizer
         criterion = nn.MSELoss()
         optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
+        scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=5, factor=0.5, verbose=True)
 
-        # Training history for visualization
+        best_val_loss = float('inf')
+        best_model_state = None
+        early_stopping_counter = 0
+        patience = 10  # Early stopping patience
+
         training_history = {'train_loss': [], 'val_loss': []}
-        best_val_loss = float('inf')  # Track the best validation loss
 
-        # Training loop
         for epoch in range(self.epochs):
-            # Training phase
             self.model.train()
             total_train_loss = 0
             for X_batch, y_batch in train_loader:
@@ -72,12 +66,28 @@ class ModelTrainer:
             training_history['val_loss'].append(avg_val_loss)
             self.logger.info(f'Epoch {epoch+1}/{self.epochs}, Validation Loss: {avg_val_loss:.4f}')
 
-            # Save the best model
+            # Adjust learning rate based on validation loss
+            scheduler.step(avg_val_loss)
+
+            # Save the best model based on validation loss
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
-                model_path = os.path.join(self.saved_models_dir, f"best_model_epoch_{epoch+1}.pth")
-                torch.save(self.model.state_dict(), model_path)
-                self.logger.info(f"Best model saved at epoch {epoch+1} with validation loss {best_val_loss:.4f} to {model_path}")
+                best_model_state = self.model.state_dict()
+                early_stopping_counter = 0  # Reset early stopping counter
+            else:
+                early_stopping_counter += 1
+
+            # Early stopping check
+            if early_stopping_counter >= patience:
+                self.logger.info(f"Early stopping at epoch {epoch+1} with best validation loss {best_val_loss:.4f}")
+                break
+
+        # Save the best model
+        if best_model_state is not None:
+            best_model_path = os.path.join(self.saved_models_dir, model_name, "best_model.pth")
+            os.makedirs(os.path.dirname(best_model_path), exist_ok=True)
+            torch.save(best_model_state, best_model_path)
+            self.logger.info(f"Best model saved with validation loss {best_val_loss:.4f} to {best_model_path}")
 
         self.logger.info("Training completed.")
         return self.model, training_history

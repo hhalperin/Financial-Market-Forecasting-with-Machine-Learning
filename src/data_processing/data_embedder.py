@@ -5,8 +5,9 @@ import pandas as pd
 from tqdm import tqdm
 import numpy as np
 import requests
-from utils.logger import get_logger
+from logger import get_logger
 from sklearn.decomposition import PCA
+from utils.data_handler import DataHandler
 
 class DataEmbedder:
     """
@@ -14,55 +15,53 @@ class DataEmbedder:
     Supports synchronous and batch processing.
     """
 
-    def __init__(self, model_type='nvidia', model_name=None, n_components=None, use_batch_api=False):
+    def __init__(self, model_type='nvidia', model_name="text-embedding-3-small", n_components=None, use_batch_api=False):
         """
         Initializes the DataEmbedder.
-
-        Parameters:
-            model_type (str): The type of model to use ('nvidia' or 'openai').
-            model_name (str): The model name or identifier.
-            n_components (int, optional): Number of PCA components for dimensionality reduction.
-            use_batch_api (bool): Whether to use the OpenAI Batch API for embedding generation.
         """
         self.model_type = model_type.lower()
         self.use_batch_api = use_batch_api
         self.n_components = n_components
         self.logger = get_logger(self.__class__.__name__)
-
-        # Initialize PCA if n_components is specified
+        # PCA Initialization
         self.pca = PCA(n_components=n_components) if n_components else None
 
+        # NVIDIA and OpenAI Initialization
         if self.model_type == 'nvidia':
-            # Import torch and transformers here to avoid unnecessary imports when using OpenAI models
             import torch
             import torch.nn.functional as F
             from transformers import AutoTokenizer, AutoModel
-
-            # Default model name for NVIDIA model if not provided
-            self.model_name = model_name or 'nvidia/NV-Embed-v2'
-            # Load the NV-Embed-v2 model and tokenizer
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
-            self.model = AutoModel.from_pretrained(self.model_name, trust_remote_code=True).to(self.device)
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+            self.model = AutoModel.from_pretrained(model_name, trust_remote_code=True).to(self.device)
             self.model.eval()
         elif self.model_type == 'openai':
-            # Default model name for OpenAI model if not provided
-            self.model_name = model_name or 'text-embedding-ada-002'
-            # Ensure that the OpenAI API key is set
+            self.model_name = model_name
             self.api_key = os.getenv('OPENAI_API_KEY')
             if not self.api_key:
-                raise ValueError("OpenAI API key not found. Set the 'OPENAI_API_KEY' environment variable.")
-            self.headers = {
-                'Authorization': f'Bearer {self.api_key}',
-                'Content-Type': 'application/json'
-            }
-            # Set the OpenAI embedding model
-            self.openai_engine = self.model_name
-            # Batch API endpoints
-            self.files_endpoint = 'https://api.openai.com/v1/files'
-            self.batches_endpoint = 'https://api.openai.com/v1/batches'
+                raise ValueError("OpenAI API key not found.")
+            self.headers = {'Authorization': f'Bearer {self.api_key}', 'Content-Type': 'application/json'}
         else:
             raise ValueError("Invalid model_type. Choose 'nvidia' or 'openai'.")
+
+    def create_embeddings_from_dataframe(self, df, ticker, date_range, data_handler, horizon_id="default"):
+        """
+        Create embeddings for the given DataFrame and save/load using DataHandler.
+        """
+        texts_for_embedding = df.apply(self._row_to_string, axis=1).tolist()
+        return data_handler(ticker, date_range, 'embeddings', lambda: self.create_embeddings(texts_for_embedding), config_id=horizon_id)
+
+    def _row_to_string(self, row):
+        """
+        Converts a row of the DataFrame to a concatenated string.
+        """
+        elements = []
+        for key, value in row.items():
+            value_str = ', '.join(map(str, value)) if isinstance(value, (list, pd.Series, np.ndarray)) else str(value) if pd.notnull(value) else 'null'
+            elements.append(f"{key}: {value_str}")
+        return ' '.join(elements)
+
+    # NVIDIA and OpenAI Embedding Functions unchanged for brevity
 
     def create_embeddings(self, texts, instruction=""):
         """
@@ -189,162 +188,4 @@ class DataEmbedder:
 
         except Exception as e:
             self.logger.error(f"Error generating embeddings with OpenAI: {e}")
-            raise
-
-    def submit_batch_job(self, texts):
-        """
-        Submits a batch job to OpenAI's Batch API for embedding generation.
-
-        Parameters:
-            texts (list of str): The texts to embed.
-
-        Returns:
-            str: The batch job ID.
-        """
-        try:
-            # Step 1: Prepare the JSONL batch input
-            self.logger.info(f"Preparing batch input file for {len(texts)} texts...")
-            batch_input = []
-            for idx, text in enumerate(texts):
-                request = {
-                    "custom_id": f"request-{idx}",
-                    "method": "POST",
-                    "url": "/v1/embeddings",
-                    "body": {
-                        "model": self.openai_engine,
-                        "input": text
-                    }
-                }
-                batch_input.append(json.dumps(request))
-
-            batch_input_file_path = "batch_input.jsonl"
-            with open(batch_input_file_path, 'w', encoding='utf-8') as f:
-                for line in batch_input:
-                    f.write(f"{line}\n")
-
-            self.logger.info("Uploading batch input file to OpenAI...")
-            with open(batch_input_file_path, 'rb') as f:
-                upload_response = requests.post(
-                    self.files_endpoint,
-                    headers={
-                        'Authorization': f'Bearer {self.api_key}'
-                    },
-                    files={
-                        'file': (os.path.basename(batch_input_file_path), f, 'application/jsonl')
-                    },
-                    data={
-                        'purpose': 'batch'
-                    }
-                )
-            upload_response.raise_for_status()
-            uploaded_file = upload_response.json()
-            batch_input_file_id = uploaded_file['id']
-            self.logger.info(f"Batch input file uploaded with ID: {batch_input_file_id}")
-
-            # Step 2: Create the batch job
-            self.logger.info("Creating batch job...")
-            batch_payload = {
-                "input_file_id": batch_input_file_id,
-                "completion_window": "24h",
-                "endpoint": "/v1/embeddings",
-                "metadata": {
-                    "description": "Batch embedding generation"
-                }
-            }
-            batch_response = requests.post(
-                self.batches_endpoint,
-                headers=self.headers,
-                json=batch_payload
-            )
-            batch_response.raise_for_status()
-            batch_job = batch_response.json()
-            batch_id = batch_job['id']
-            self.logger.info(f"Batch job created with ID: {batch_id}")
-
-            # Optionally, delete the batch input file after submission
-            os.remove(batch_input_file_path)
-            self.logger.info(f"Removed temporary batch input file {batch_input_file_path}")
-
-            return batch_id
-
-        except Exception as e:
-            self.logger.error(f"Error submitting batch job: {e}")
-            raise
-
-    def retrieve_batch_results(self, batch_id):
-        """
-        Retrieves the results of a completed batch job.
-
-        Parameters:
-            batch_id (str): The ID of the batch job.
-
-        Returns:
-            numpy.ndarray: An array containing the embeddings for each text.
-        """
-        try:
-            # Step 3: Poll for batch job completion
-            self.logger.info("Waiting for batch job to complete...")
-            while True:
-                status_response = requests.get(
-                    f"{self.batches_endpoint}/{batch_id}",
-                    headers=self.headers
-                )
-                status_response.raise_for_status()
-                status_data = status_response.json()
-                status = status_data['status']
-                self.logger.info(f"Batch status: {status}")
-                if status in ["completed", "failed", "cancelled"]:
-                    break
-                time.sleep(60)  # Increased wait time to 60 seconds to avoid timeout
-
-            if status != "completed":
-                self.logger.error(f"Batch job did not complete successfully. Status: {status}")
-                raise Exception(f"Batch job failed with status: {status}")
-
-            # Step 4: Retrieve the output file
-            output_file_id = status_data.get('output_file_id')
-            if not output_file_id:
-                self.logger.error("No output_file_id found in batch job response.")
-                raise Exception("Batch job completed but no output file ID found.")
-
-            self.logger.info(f"Retrieving output file with ID: {output_file_id}")
-            output_file_response = requests.get(
-                f"{self.files_endpoint}/{output_file_id}/content",
-                headers={
-                    'Authorization': f'Bearer {self.api_key}'
-                }
-            )
-            output_file_response.raise_for_status()
-            output_content = output_file_response.text
-
-            # Step 5: Process the output file
-            self.logger.info("Processing output file...")
-            output_embeddings = {}
-            for line in output_content.splitlines():
-                data = json.loads(line)
-                custom_id = data.get('custom_id')
-                response_data = data.get('response')
-                if response_data and response_data.get('status_code') == 200:
-                    embedding = response_data['body']['embedding']
-                    idx = int(custom_id.split("-")[1])
-                    output_embeddings[idx] = embedding
-                else:
-                    error = data.get('error')
-                    self.logger.error(f"Error in request {custom_id}: {error}")
-                    raise Exception(f"Error in batch request {custom_id}: {error}")
-
-            # Ensure the embeddings are in the correct order
-            embeddings = [output_embeddings[idx] for idx in sorted(output_embeddings.keys())]
-            embeddings = np.array(embeddings)
-
-            # Step 6: Apply PCA if specified
-            if self.pca:
-                self.logger.info(f"Applying PCA to reduce embeddings to {self.n_components} dimensions.")
-                embeddings = self.pca.fit_transform(embeddings)
-
-            self.logger.info(f"Retrieved embeddings for {len(embeddings)} texts from batch job.")
-            return embeddings
-
-        except Exception as e:
-            self.logger.error(f"Error retrieving batch results: {e}")
             raise
