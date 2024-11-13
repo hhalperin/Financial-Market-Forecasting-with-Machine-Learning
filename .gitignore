@@ -1,4 +1,4 @@
 # Ignore .env files
 .env
 .venv
-dir_to_ignore/data/embedded/
+data/embedded/
