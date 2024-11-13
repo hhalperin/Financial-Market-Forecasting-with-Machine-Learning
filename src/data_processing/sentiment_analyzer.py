@@ -2,8 +2,7 @@ import pandas as pd
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from tqdm import tqdm
-import logging
-from utils.logger import get_logger
+from logger import get_logger
 
 class SentimentAnalyzer:
     """
@@ -24,6 +23,7 @@ class SentimentAnalyzer:
         """
         positive_probs, negative_probs, neutral_probs, predicted_labels = [], [], [], []
 
+        self.logger.info(f"Analyzing sentiment for {len(texts)} texts...")
         for i in tqdm(range(0, len(texts), batch_size), desc="Sentiment Analysis"):
             batch_texts = texts[i:i + batch_size]
             inputs = self.tokenizer(batch_texts, padding=True, truncation=True, return_tensors='pt', max_length=512)
@@ -34,13 +34,12 @@ class SentimentAnalyzer:
                 logits = outputs.logits
                 probabilities = torch.softmax(logits, dim=1).cpu().numpy()
 
+            # Extract sentiment probabilities
             for prob in probabilities:
                 positive_probs.append(prob[0])
                 negative_probs.append(prob[1])
                 neutral_probs.append(prob[2])
-                predicted_label_id = prob.argmax()
-                predicted_label = self.model.config.id2label[predicted_label_id]
-                predicted_labels.append(predicted_label)
+                predicted_labels.append(self.model.config.id2label[prob.argmax()])
 
         self.logger.info("Completed sentiment analysis.")
         return positive_probs, negative_probs, neutral_probs, predicted_labels
