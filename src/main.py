@@ -1,36 +1,31 @@
 import time
 import pandas as pd
-from data_aggregation import aggregate_data
+from data_aggregation import DataAggregator
 from data_processing.preprocessing_manager import PreprocessingManager, TimeHorizonManager
 from models.model_pipeline import ModelPipeline
 from sklearn.model_selection import train_test_split
 from models import ModelManager
 from logger import get_logger
 
-
 def main():
     logger = get_logger('Main')
-    ticker = 'AAPL'
-    start_date = '2021-01-01'
-    end_date = '2021-06-31'  # Intentional invalid date to demonstrate correction
-
     use_batch_api = False  # Set this to True to use batch API submission/retrieval
 
     total_start_time = time.time()
-
     logger.info("Starting data aggregation...")
     # Step 1: Aggregate Data
     try:
-        price_df, news_df = aggregate_data(ticker, start_date, end_date)
+        aggregator = DataAggregator(ticker='AAPL', start_date='2021-01-01', end_date='2021-06-30')
+        price_df, news_df = aggregator.aggregate_data()
+        
+        if price_df is None or price_df.empty:
+            logger.error("Price data aggregation resulted in an empty or None DataFrame.")
+            return
+        if news_df is None or news_df.empty:
+            logger.error("News data aggregation resulted in an empty or None DataFrame.")
+            return
     except Exception as e:
         logger.error(f"Error during data aggregation: {e}")
-        return
-
-    if price_df is None or price_df.empty:
-        logger.error("Price data aggregation resulted in an empty or None DataFrame.")
-        return
-    if news_df is None or news_df.empty:
-        logger.error("News data aggregation resulted in an empty or None DataFrame.")
         return
 
     logger.info("Data aggregation completed. Starting preprocessing...")
