@@ -1,17 +1,19 @@
 import time
+import pandas as pd
 from data_aggregation import aggregate_data
-from data_processing.data_preprocessor import DataPreprocessor
 from data_processing.preprocessing_manager import PreprocessingManager, TimeHorizonManager
 from models.model_pipeline import ModelPipeline
 from sklearn.model_selection import train_test_split
 from models import ModelManager
 from logger import get_logger
 
+
 def main():
     logger = get_logger('Main')
     ticker = 'AAPL'
-    start_date = '2020-01-01'
-    end_date = '2022-01-31'
+    start_date = '2021-01-01'
+    end_date = '2021-06-31'  # Intentional invalid date to demonstrate correction
+
     use_batch_api = False  # Set this to True to use batch API submission/retrieval
 
     total_start_time = time.time()
@@ -33,37 +35,29 @@ def main():
 
     logger.info("Data aggregation completed. Starting preprocessing...")
     # Step 2: Preprocess Data
-    data_preprocessor = DataPreprocessor(price_df, news_df)
-    try:
-        merged_df = data_preprocessor.align_data()
-    except Exception as e:
-        logger.error(f"Error during data alignment: {e}")
-        return
-
-    if merged_df is None or merged_df.empty:
-        logger.error("Merged DataFrame is empty after alignment.")
-        return
-
-    preprocessed_df = data_preprocessor.clean_data(merged_df)
-    if preprocessed_df is None or preprocessed_df.empty:
-        logger.error("Preprocessed DataFrame is empty after cleaning.")
-        return
-
-    # Step 3: Filter on article release events and calculate dynamic targets
-    preprocessing_manager = PreprocessingManager(preprocessed_df)
-    filtered_df = preprocessing_manager.filter_on_article_release()
-    if filtered_df is None or filtered_df.empty:
-        logger.error("Filtered DataFrame is empty after article release filtering.")
-        return
-
-    logger.info("Generating time horizons and calculating dynamic targets...")
-    # Step 4: Generate time horizons and calculate dynamic targets
+    preprocessing_manager = PreprocessingManager(pd.concat([price_df, news_df], axis=1))
+    
+    # Step 2.1: Generate time horizons for dynamic target calculation
     time_horizon_manager = TimeHorizonManager(start_date, end_date)
     time_horizons = time_horizon_manager.generate_time_horizons()
     if not time_horizons:
         logger.error("No valid time horizons generated. Exiting.")
         return
 
+    try:
+        # Perform the entire preprocessing pipeline before filtering
+        preprocessing_manager.preprocess(target_configs=[], time_horizons=time_horizons)
+    except Exception as e:
+        logger.error(f"Error during preprocessing: {e}")
+        return
+
+    # Step 3: Filter on article release events
+    filtered_df = preprocessing_manager.filter_on_article_release()
+    if filtered_df is None or filtered_df.empty:
+        logger.error("Filtered DataFrame is empty after article release filtering.")
+        return
+
+    # Step 4: Calculate dynamic targets
     preprocessing_manager.df = filtered_df
     try:
         preprocessing_manager.calculate_dynamic_targets(column_name='Close', target_configs=time_horizons)
