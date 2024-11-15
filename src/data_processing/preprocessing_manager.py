@@ -108,7 +108,6 @@ class PreprocessingManager:
         
         return self.df
 
-
 class TimeHorizonManager:
     def __init__(self, start_date, end_date):
         self.start_date = pd.to_datetime(start_date)
