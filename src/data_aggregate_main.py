@@ -41,7 +41,7 @@ def setup_data_handler(config):
     """
     if config["local_mode"]:
         logger.info("[SETUP] Using local file storage.")
-        return DataHandler(base_data_dir="data", storage_mode="local")
+        return DataHandler(base_data_dir="../data", storage_mode="local")
     else:
         logger.info(f"[SETUP] Using S3 file storage with bucket: {config['s3_bucket']}")
         return DataHandler(bucket=config["s3_bucket"], storage_mode="s3")
@@ -74,18 +74,21 @@ def main():
     logger.info("[MAIN] Starting data aggregation...")
     price_df, news_df = aggregator.aggregate_data()
 
-    # Log results
+    # Save aggregated data
     if price_df is not None and not price_df.empty:
-        logger.info(f"[MAIN] Aggregated price data: {price_df.shape} rows.")
+        logger.info("[MAIN] Saving price data...")
+        data_handler.save_data(price_df, f"{config['ticker']}_price_{config['start_date']}_to_{config['end_date']}.csv", "price", "aggregated")
     else:
         logger.warning("[MAIN] No price data was aggregated.")
 
     if news_df is not None and not news_df.empty:
-        logger.info(f"[MAIN] Aggregated news data: {news_df.shape} rows.")
+        logger.info("[MAIN] Saving news data...")
+        data_handler.save_data(news_df, f"{config['ticker']}_news_{config['start_date']}_to_{config['end_date']}.csv", "news", "aggregated")
     else:
         logger.warning("[MAIN] No news data was aggregated.")
 
     logger.info("[MAIN] Data aggregation process completed.")
+
 
 if __name__ == "__main__":
     main()

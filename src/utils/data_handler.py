@@ -9,7 +9,7 @@ from utils.logger import get_logger
 logger = get_logger('DataHandler')
 
 class DataHandler:
-    def __init__(self, bucket=None, base_data_dir='data', storage_mode='local'):
+    def __init__(self, bucket=None, base_data_dir='../data', storage_mode='local'):
         """
         :param bucket: S3 bucket name (if storage_mode='s3').
         :param base_data_dir: The top-level folder for local data storage (default='data').
@@ -114,8 +114,13 @@ class DataHandler:
     def _prepare_local_path(self, filename, stage, create=True):
         stage_dir = os.path.join(self.base_data_dir, stage)
         if create:
-            os.makedirs(stage_dir, exist_ok=True)
+            try:
+                os.makedirs(stage_dir, exist_ok=True)
+                logger.debug(f"Created directory: {stage_dir}")
+            except Exception as e:
+                logger.error(f"Failed to create directory {stage_dir}: {e}")
         return os.path.join(stage_dir, filename)
+
 
     def save_bytes(self, data_bytes, filename, stage='models'):
         path = self._prepare_local_path(filename, stage)

@@ -4,6 +4,7 @@ import talib
 from utils.logger import get_logger
 from data_processing.sentiment_processor import SentimentProcessor
 from data_processing.market_analyzer import MarketAnalyzer
+from data_processing.data_embedder import DataEmbedder
 
 pd.set_option('future.no_silent_downcasting', True)
 
@@ -12,17 +13,20 @@ class DataProcessor:
     Handles the end-to-end processing pipeline for merging, analyzing, and preparing data for ML.
     """
 
-    def __init__(self, price_df, news_df, sentiment_model="ProsusAI/finbert"):
+    def __init__(self, price_df, news_df, sentiment_model="ProsusAI/finbert", embedding_model="sentence-transformers/all-MiniLM-L6-v2"):
         """
         :param price_df: DataFrame with stock price data.
         :param news_df: DataFrame with news articles.
         :param sentiment_model: Hugging Face model for sentiment analysis.
+        :param embedding_model: Hugging Face model for embedding generation.
         """
         self.logger = get_logger(self.__class__.__name__)
         self.price_df = price_df.copy() if price_df is not None else pd.DataFrame()
         self.news_df = news_df.copy() if news_df is not None else pd.DataFrame()
         self.sentiment_processor = SentimentProcessor(model_name=sentiment_model)
-        self.df = None  # Placeholder for processed DataFrame
+        self.embedder = DataEmbedder(model_name=embedding_model)
+        self.df = None  
+        self.embeddings = None  
 
     def clean_price_data(self):
         """
@@ -120,6 +124,20 @@ class DataProcessor:
         self.df.fillna(0, inplace=True)
         self.logger.info("Dynamic targets calculated.")
 
+    def generate_embeddings(self, columns_to_embed=None):
+        """
+        Generates embeddings for specified columns in the DataFrame.
+        :param columns_to_embed: List of column names to embed.
+        """
+        if self.df is None or self.df.empty:
+            self.logger.warning("No DataFrame available to generate embeddings.")
+            return
+
+        self.embeddings = self.embedder.generate_embeddings(
+            self.df[columns_to_embed].fillna('').agg(' '.join, axis=1).tolist()
+        )
+        self.logger.info(f"Embeddings generated. Shape: {self.embeddings.shape}")
+
     def process_pipeline(self, time_horizons, target_configs):
         """
         Executes the full data processing pipeline.
@@ -128,6 +146,7 @@ class DataProcessor:
         - Preprocesses news data.
         - Merges data.
         - Performs sentiment analysis.
+        - Generates embeddings.
         - Calculates dynamic targets.
         :param time_horizons: List of time horizon configurations.
         :param target_configs: List of target configurations.
@@ -143,8 +162,13 @@ class DataProcessor:
         self.preprocess_news()
         self.merge_data()
 
-        # Step 3: Perform sentiment analysis and target calculations
+        # Step 3: Perform sentiment analysis
         self.process_sentiment()
+
+        # Step 4: Generate embeddings
+        self.generate_embeddings(columns_to_embed=['title', 'summary'])
+
+        # Step 5: Calculate dynamic targets
         self.calculate_dynamic_targets('Close', target_configs)
 
         self.logger.info(f"Final processed DataFrame shape: {self.df.shape}")

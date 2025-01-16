@@ -7,6 +7,7 @@ from utils.logger import get_logger
 from utils.data_handler import DataHandler
 from data_processing.data_processing import DataProcessor
 from data_processing.time_horizon_manager import TimeHorizonManager
+from data_processing.data_embedder import DataEmbedder
 from datetime import timedelta
 
 logger = get_logger("DataProcessingMain")
@@ -77,6 +78,12 @@ def main():
     # Preprocess and process pipeline
     processed_df = processor.process_pipeline(time_horizons, target_configs)
     print_dataframe_info("Final processed DataFrame", processed_df)
+
+    # Save embeddings (if generated)
+    if processor.embeddings is not None:
+        embeddings_filename = f"{ticker}_embeddings_{date_range}.npy"
+        processor.embedder.save_embeddings(processor.embeddings, embeddings_filename, data_handler, stage='embeddings')
+
 
     # 6) Save final preprocessed data
     def fetch_preprocessed():

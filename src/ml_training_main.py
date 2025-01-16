@@ -48,10 +48,10 @@ def main():
 
     # Build DataHandler
     if storage_mode == 'local':
-        data_handler = DataHandler(base_data_dir='data', storage_mode='local')
+        data_handler = DataHandler(base_data_dir='../data', storage_mode='local')
     else:
         s3_bucket = os.getenv("S3_BUCKET", None)
-        data_handler = DataHandler(bucket=s3_bucket, base_data_dir='data', storage_mode='s3')
+        data_handler = DataHandler(bucket=s3_bucket, base_data_dir='../data', storage_mode='s3')
 
     # 1) Load embeddings + preprocessed DataFrame
     ticker = "AAPL"
