@@ -1,6 +1,7 @@
 # Ignore .env files
 .env
 .venv
-data/embeddings/
+data/
+
 quant-h2_website/
 terraform/
