@@ -48,14 +48,16 @@ class DataProcessor:
         self.news_df.sort_values('time_published', inplace=True)
         self.logger.info(f"Preprocessed news_df. Shape: {self.news_df.shape}")
 
-    def perform_market_analysis(self, time_horizons):
+    def perform_market_analysis(self, max_gather_minutes, step=5):
         """
         Adds technical indicators and price fluctuations to the price DataFrame.
-        :param time_horizons: List of dictionaries specifying time horizons.
+        :param max_gather_minutes: Maximum gather time horizon in minutes.
+        :param step: Step size for intervals in minutes (default is 5).
         """
         analyzer = MarketAnalyzer(self.price_df)
-        self.price_df = analyzer.analyze_market(time_horizons)
+        self.price_df = analyzer.analyze_market(max_gather_minutes, step)
         self.logger.info(f"Market analysis completed. Shape: {self.price_df.shape}")
+
 
     def merge_data(self):
         """
@@ -108,22 +110,6 @@ class DataProcessor:
         self.df = self.sentiment_processor.compute_expected_sentiment(self.df)
         self.logger.info("Sentiment analysis completed.")
 
-    def calculate_dynamic_targets(self, column_name, target_configs):
-        """
-        Creates dynamic target columns based on prediction time horizons.
-        :param column_name: Column to base the target (e.g., 'Close').
-        :param target_configs: List of configurations with prediction horizons.
-        """
-        for config in target_configs:
-            target_name = config['target_name']
-            predict_td = config['time_horizon']
-            minutes = int(predict_td.total_seconds() // 60)
-            self.df[target_name] = self.df[column_name].shift(-minutes) - self.df[column_name]
-        
-        # Fill missing values and ensure proper dtype inference
-        self.df.fillna(0, inplace=True)
-        self.logger.info("Dynamic targets calculated.")
-
     def generate_embeddings(self, columns_to_embed=None):
         """
         Generates embeddings for specified columns in the DataFrame.
@@ -138,25 +124,23 @@ class DataProcessor:
         )
         self.logger.info(f"Embeddings generated. Shape: {self.embeddings.shape}")
 
-    def process_pipeline(self, time_horizons, target_configs):
+    def process_pipeline(self, time_horizons):
         """
         Executes the full data processing pipeline.
-        - Cleans price data.
-        - Performs market analysis.
-        - Preprocesses news data.
-        - Merges data.
-        - Performs sentiment analysis.
-        - Generates embeddings.
-        - Calculates dynamic targets.
-        :param time_horizons: List of time horizon configurations.
-        :param target_configs: List of target configurations.
-        :return: Processed DataFrame.
         """
         self.logger.info("Starting data processing pipeline...")
 
+        if not time_horizons:
+            raise ValueError("time_horizons is empty. Ensure it is generated correctly before processing.")
+
+        # Extract max_gather_minutes
+        max_gather_minutes = max(
+            int(config['time_horizon'].total_seconds() // 60) for config in time_horizons
+        )
+
         # Step 1: Clean and analyze price data
         self.clean_price_data()
-        self.perform_market_analysis(time_horizons)
+        self.perform_market_analysis(max_gather_minutes, step=5)
 
         # Step 2: Preprocess and merge news data
         self.preprocess_news()
@@ -167,9 +151,6 @@ class DataProcessor:
 
         # Step 4: Generate embeddings
         self.generate_embeddings(columns_to_embed=['title', 'summary'])
-
-        # Step 5: Calculate dynamic targets
-        self.calculate_dynamic_targets('Close', target_configs)
 
         self.logger.info(f"Final processed DataFrame shape: {self.df.shape}")
         return self.df

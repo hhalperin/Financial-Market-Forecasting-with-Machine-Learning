@@ -55,8 +55,7 @@ def main():
 
     # Generate time horizon configurations
     thm = TimeHorizonManager()
-    testing = True
-    combos = thm.testing_horizon_combos(max_combos=10) if testing else thm.generate_horizon_combos(max_combos=1500)
+    combos = thm.generate_horizon_combos()
 
     # Ensure time horizons are in timedelta format
     for combo in combos:
@@ -66,17 +65,13 @@ def main():
     logger.info(f"Generated {len(combos)} time horizon combos.")
 
     time_horizons = [
-        {"target_name": combo["gather_name"], "time_horizon": combo["gather_td"]} for combo in combos
-    ] + [
-        {"target_name": combo["predict_name"], "time_horizon": combo["predict_td"]} for combo in combos
+        {"target_name": f"{minutes}_minutes", "time_horizon": timedelta(minutes=minutes)}
+        for minutes in range(5, 2880 + 1, 5)
     ]
 
-    target_configs = [
-        {"time_horizon": combo["predict_td"], "target_name": f"target_{combo['predict_name']}"} for combo in combos
-    ]
 
     # Preprocess and process pipeline
-    processed_df = processor.process_pipeline(time_horizons, target_configs)
+    processed_df = processor.process_pipeline(time_horizons)
     print_dataframe_info("Final processed DataFrame", processed_df)
 
     # Save embeddings (if generated)
