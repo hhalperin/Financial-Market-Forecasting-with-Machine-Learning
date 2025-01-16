@@ -4,7 +4,7 @@ import os
 import torch
 import pandas as pd
 from models.stock_predictor import StockPredictor
-from logger import get_logger
+from src.utils.logger import get_logger
 from data_aggregation import aggregate_data
 from data_processing import preprocess_data, TimeHorizonManager
 from models.model_pipeline import ModelPipeline

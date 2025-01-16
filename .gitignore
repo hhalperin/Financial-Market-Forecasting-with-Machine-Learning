@@ -3,3 +3,4 @@
 .venv
 data/embeddings/
 quant-h2_website/
+terraform/
