@@ -1,7 +1,6 @@
 # Ignore .env files
 .env
 .venv
-data/
-
-quant-h2_website/
-terraform/
+data
+quant-h2_website
+terraform
