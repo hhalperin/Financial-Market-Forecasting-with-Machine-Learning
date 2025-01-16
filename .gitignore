@@ -1,5 +1,14 @@
 # Ignore .env files
 .env
-.venv
-data/embeddings/
+
+# Ignore virtual environment folder
+.venv/
+
+# Ignore data folder
+data/
+
+# Ignore quant-h2_website folder
 quant-h2_website/
+
+# Ignore terraform folder
+terraform/

@@ -1,11 +1,9 @@
+# models/stock_predictor.py
+
 import torch
 import torch.nn as nn
 
 class StockPredictor(nn.Module):
-    """
-    Defines the PyTorch model architecture for stock prediction.
-    """
-
     def __init__(self, input_size, hidden_layers, output_size=1, dropout_rate=0.2):
         super(StockPredictor, self).__init__()
         layers = []
