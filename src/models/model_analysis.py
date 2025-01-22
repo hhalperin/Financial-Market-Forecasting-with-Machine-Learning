@@ -6,9 +6,11 @@ import shap
 import matplotlib.pyplot as plt
 import pandas as pd
 import json
+import numpy as np
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from src.utils.logger import get_logger
 import torch
+import seaborn as sns  # <--- Make sure "seaborn" is in your requirements.txt
 
 class ModelAnalysis:
     """
@@ -16,20 +18,12 @@ class ModelAnalysis:
     """
 
     def __init__(self, data_handler, model_stage="models", model_name="model"):
-        """
-        :param data_handler: A DataHandler instance for saving/loading data.
-        :param model_stage: Directory or 'stage' where models and figures will be saved.
-        :param model_name: A base name for saving model artifacts.
-        """
         self.data_handler = data_handler
         self.model_stage = model_stage
         self.model_name = model_name
         self.logger = get_logger(self.__class__.__name__)
 
     def compute_metrics(self, y_true, y_pred):
-        """
-        Returns dict of MSE, MAE, R^2 metrics.
-        """
         mse = mean_squared_error(y_true, y_pred)
         mae = mean_absolute_error(y_true, y_pred)
         r2 = r2_score(y_true, y_pred)
@@ -37,9 +31,6 @@ class ModelAnalysis:
         return {"mse": mse, "mae": mae, "r2": r2}
 
     def plot_learning_curve(self, training_history, model_name, value=None):
-        """
-        Plots train/val loss over epochs and saves the figure via data_handler.
-        """
         figure_filename = f"{model_name}_learning_curve.png"
         plt.figure(figsize=(10, 6))
         plt.plot(training_history["train_loss"], label="Train Loss")
@@ -52,14 +43,9 @@ class ModelAnalysis:
         plt.ylabel("Loss")
         plt.legend()
         plt.grid(True)
-
-        # Save using our helper
         self._save_figure(figure_filename)
 
     def plot_actual_vs_predicted(self, y_true, y_pred, model_name, value=None):
-        """
-        Scatters the actual vs. predicted for a quick visual check of model performance.
-        """
         figure_filename = f"{model_name}_actual_vs_predicted"
         if value is not None:
             figure_filename += f"_{value:.4f}"
@@ -76,95 +62,80 @@ class ModelAnalysis:
         plt.ylabel("Stock Price Change (%)")
         plt.legend()
         plt.grid(True)
-
-        # Save using our helper
         self._save_figure(figure_filename)
 
     def plot_shap_feature_importance(self, model, X_np, model_name, value=None):
-        """
-        Generates and saves a SHAP feature importance plot for a PyTorch model.
-        By default uses shap.DeepExplainer with a small background set.
-        """
         figure_filename = f"{model_name}_shap_importance"
         if value is not None:
             figure_filename += f"_{value:.4f}"
         figure_filename += ".png"
 
-        # Convert X to torch tensor
         X_torch = torch.tensor(X_np, dtype=torch.float32)
-
-        # Make sure the model is in eval mode
         model.eval()
-
-        # Create a small sample for shap background
         background = X_torch[:100]
 
         try:
-            # Use DeepExplainer if possible
             explainer = shap.DeepExplainer(model, background)
             shap_values = explainer.shap_values(X_torch)
 
             shap.summary_plot(shap_values, X_np, show=False)
             self._save_figure(figure_filename)
-
         except Exception as e:
             self.logger.error(f"SHAP failed: {e}")
 
-    def generate_all_plots(self, training_history, y_true, y_pred, model, X_np,
-                           model_name, value=None):
+    def plot_feature_correlation_heatmap(self, X_np, y_true, model_name):
         """
-        Helper to produce all relevant plots. 
-        No external 'save_dir' needed; everything is saved via data_handler in self.model_stage.
+        Creates a correlation matrix among all features + 1 column for the target,
+        then plots a seaborn heatmap of correlation.
         """
+        figure_filename = f"{model_name}_correlation_heatmap.png"
+
+        # Combine features + target
+        # If you have column names for X_np, pass them in or do range-based.
+        d = X_np.shape[1]
+        feature_names = [f"feat_{i}" for i in range(d)]
+        df_features = pd.DataFrame(X_np, columns=feature_names)
+        df_features["target"] = y_true
+
+        corr = df_features.corr(method="pearson")  # or "spearman"
+        plt.figure(figsize=(max(8, d/2), max(8, d/2)))  # scale fig size by # of features maybe
+        sns.heatmap(corr, annot=False, cmap="coolwarm", square=True)
+        plt.title(f"Correlation Heatmap (Features + Target)")
+        self._save_figure(figure_filename)
+
+    def generate_all_plots(self, training_history, y_true, y_pred, model, X_np, model_name, value=None):
         self.plot_learning_curve(training_history, model_name, value)
         self.plot_actual_vs_predicted(y_true, y_pred, model_name, value)
         self.plot_shap_feature_importance(model, X_np, model_name, value)
+        # Add the new correlation heatmap
+        self.plot_feature_correlation_heatmap(X_np, y_true, model_name)
 
     def save_summary_table(self, results):
-        """
-        Save a summary table of training results to a CSV file.
-        :param results: List of dictionaries containing results.
-        """
         if not results:
             self.logger.warning("No results to save in summary table.")
             return
-
-        # Save results as a CSV
         df = pd.DataFrame(results)
         summary_filename = f"{self.model_name}_summary.csv"
         self.data_handler.save_dataframe(df, summary_filename, stage=self.model_stage)
         self.logger.info(f"Summary table saved: {summary_filename}")
 
-        # Save detailed model information as JSON
         details_filename = f"{self.model_name}_details.json"
         self._save_model_details(results, details_filename)
         self.logger.info(f"Model details saved: {details_filename}")
 
     def _save_model_details(self, results, filename):
-        """
-        Save detailed model information to a JSON file.
-        :param results: List of dictionaries containing model information.
-        """
         details = {"trials": results}
         self.data_handler.save_json(details, filename, stage=self.model_stage)
 
     def save_json_summary(self, trial_results):
-        """
-        Save detailed trial results in JSON format.
-        """
         if not trial_results:
             self.logger.warning("No trial results to save.")
             return
-
         json_filename = f"{self.model_name}_trial_results.json"
         self.data_handler.save_json(trial_results, json_filename, stage=self.model_stage)
         self.logger.info(f"Trial results saved to JSON: {json_filename}")
 
     def _save_figure(self, figure_filename):
-        """
-        Save the current matplotlib figure to data_handler, then close it.
-        Using the self.model_stage for consistent saving.
-        """
         buffer = io.BytesIO()
         plt.savefig(buffer, format="png")
         buffer.seek(0)

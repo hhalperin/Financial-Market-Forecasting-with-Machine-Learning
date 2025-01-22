@@ -82,15 +82,20 @@ def main(sentiment_threshold):
 
     # 3) (Optional) Basic Trials or direct training
     #    Example direct training across horizons, with optional sentiment filtering:
-    results = pipeline.train_on_horizons(
-        X_df, 
-        df, 
-        max_combos=1000,            # Train on up to 10 horizon combos
-        save_best_only=True,      # Only save best model for each horizon
-        filter_sentiment=True,    # Remove rows below threshold
-        sentiment_threshold=0.2   # You can tune this threshold
+    # Suppose we want to do advanced filtering with multiple columns:
+    sent_cols = ["title_positive","summary_positive","expected_sentiment","summary_negative"]
+    pipeline.train_on_horizons(
+        X_df,
+        df,
+        max_combos=2000,
+        save_best_only=True,
+        filter_sentiment=True,
+        sentiment_threshold=0.35,
+        sentiment_cols=sent_cols,     # any columns you want to test
+        sentiment_mode="any"         # keep row if ANY col >= 0.3
     )
-    logger.info(f"Training complete. Results: {results}")
+
+    logger.info(f"Training complete.")
 
     # 4) (Optional) Or run an Optuna optimization:
     def baseline_mse(y_true):
@@ -125,22 +130,22 @@ def main(sentiment_threshold):
         return val_mse
 
     # Uncomment to actually run Optuna
-    # import optuna
-    # from tqdm import tqdm
+    import optuna
+    from tqdm import tqdm
 
-    # study = optuna.create_study(direction="minimize")
-    # logger.info("Starting hyperparameter optimization with Optuna...")
+    study = optuna.create_study(direction="minimize")
+    logger.info("Starting hyperparameter optimization with Optuna...")
 
-    # def run_study_with_progress(study, n_trials):
-    #     with tqdm(total=n_trials, desc="Optuna Trials") as pbar:
-    #         def callback(study, trial):
-    #             pbar.update(1)
-    #         study.optimize(optimize, n_trials=n_trials, callbacks=[callback])
+    def run_study_with_progress(study, n_trials):
+        with tqdm(total=n_trials, desc="Optuna Trials") as pbar:
+            def callback(study, trial):
+                pbar.update(1)
+            study.optimize(optimize, n_trials=n_trials, callbacks=[callback])
 
-    # run_study_with_progress(study, n_trials=50)
-    # logger.info(f"Best trial: {study.best_trial.number} val={study.best_trial.value}")
-    # logger.info(f"Best params: {study.best_trial.params}")
+    run_study_with_progress(study, n_trials=50)
+    logger.info(f"Best trial: {study.best_trial.number} val={study.best_trial.value}")
+    logger.info(f"Best params: {study.best_trial.params}")
 
 
 if __name__ == "__main__":
-    main(sentiment_threshold = 0.4)
+    main(sentiment_threshold = 0.5)
