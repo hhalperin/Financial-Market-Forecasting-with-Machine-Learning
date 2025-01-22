@@ -39,7 +39,7 @@ def build_data_handler(config):
     else:
         return DataHandler(storage_mode="local")
 
-def main():
+def main(sentiment_threshold):
     config = load_config()
     logger.info(f"[MLTrainingMain] config={config}")
 
@@ -74,7 +74,7 @@ def main():
         hidden_layers=[256, 128, 64],
         learning_rate=0.001,
         batch_size=32,
-        epochs=5,
+        epochs=10,
         data_handler=data_handler,
         use_time_split=True
     )
@@ -85,7 +85,7 @@ def main():
     results = pipeline.train_on_horizons(
         X_df, 
         df, 
-        max_combos=10,            # Train on up to 10 horizon combos
+        max_combos=1000,            # Train on up to 10 horizon combos
         save_best_only=True,      # Only save best model for each horizon
         filter_sentiment=True,    # Remove rows below threshold
         sentiment_threshold=0.2   # You can tune this threshold
@@ -115,7 +115,7 @@ def main():
 
         df_filtered = df.dropna(subset=[target_col]).copy()
         # If filtering sentiment in the trial, do it here:
-        df_filtered = pipeline.filter_low_impact_sentiment(df_filtered, threshold=0.2)
+        df_filtered = pipeline.filter_low_impact_sentiment(df_filtered, threshold=sentiment_threshold)
         X_f = X_df.loc[df_filtered.index]
         y_f = df_filtered[target_col].values
         if X_f.empty:
@@ -143,4 +143,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(sentiment_threshold = 0.4)
