@@ -3,13 +3,12 @@
 import os
 import time
 from dotenv import load_dotenv
-from utils.logger import get_logger
+from src.utils.logger import get_logger
 
 # Import the main() functions from each module.
-from data_aggregate_main import main as aggregator_main
-from data_processing_main import main as processing_main
-from embedding_main import main as embedding_main
-from ml_training_main import main as ml_training_main
+from src.data_aggregation.main import main as aggregator_main
+from data_processing.main import main as processing_main
+from models.main import main as ml_training_main
 
 logger = get_logger("TestAllPipeline")
 
@@ -22,9 +21,6 @@ def main():
 
     logger.info("--- Starting Data Processing ---")
     processing_main()
-
-    logger.info("--- Starting Embedding Generation ---")
-    embedding_main()
 
     logger.info("--- Starting ML Training ---")
     ml_training_main()

@@ -1,67 +1,140 @@
-import json
-import numpy as np
-from datetime import timedelta
-from data_processing import PreprocessingManager, TimeHorizonManager, DataEmbedder
-from utils.logger import get_logger
-from sklearn.model_selection import train_test_split
-from utils.data_handler import DataHandler
+from src.utils.logger import get_logger
+from .model_analysis import ModelAnalysis
+import os
+from tqdm import tqdm
 
 class ModelPipeline:
-    def __init__(self, ticker, start_date, end_date, use_batch_api=False, s3_bucket=None):
-        self.ticker = ticker
-        self.start_date = start_date
-        self.end_date = end_date
-        self.use_batch_api = use_batch_api
-        self.logger = get_logger('ModelPipeline')
-        self.data_handler = DataHandler(s3_bucket)
-        self.s3_prefix = f"{ticker}_{start_date}_to_{end_date}/"
+    """
+    Coordinates data preparation and model training across multiple time horizons.
+    """
 
-    def handle_embeddings(self, preprocessed_df, config_id):
-        embeddings_key = f"{self.s3_prefix}{config_id}_embeddings.npy"
+    def __init__(self, model_manager, data_handler, horizon_manager):
+        """
+        :param model_manager: Instance of ModelManager for training and evaluation.
+        :param data_handler: Handles data loading and saving.
+        :param horizon_manager: Instance of TimeHorizonManager for generating combos.
+        """
+        self.model_manager = model_manager
+        self.data_handler = data_handler
+        self.horizon_manager = horizon_manager
+        self.logger = get_logger(self.__class__.__name__)
 
-        # If using batch APIs, skip for brevity (assume local embeddings)
-        if not self.use_batch_api:
-            self.logger.info("Generating embeddings synchronously...")
-            embedder = DataEmbedder(
-                model_type='nvidia', 
-                model_name='sentence-transformers/all-MiniLM-L6-v2', 
-                n_components=128, 
-                use_batch_api=False
+    def filter_low_impact_sentiment(
+        self, df, pos_col="title_positive", neg_col="title_negative", threshold=0.2
+    ):
+        """
+        Removes rows where neither positive nor negative sentiment is above 'threshold'.
+        This helps focus on high-impact sentiment articles.
+
+        :param df: DataFrame with sentiment columns (pos_col, neg_col).
+        :param pos_col: Name of the column for positive sentiment probability.
+        :param neg_col: Name of the column for negative sentiment probability.
+        :param threshold: Minimum sentiment probability required to keep the row.
+        :return: Filtered DataFrame.
+        """
+        if pos_col not in df.columns or neg_col not in df.columns:
+            self.logger.warning(
+                f"Sentiment columns '{pos_col}' or '{neg_col}' not found. Skipping filter."
             )
-            embeddings = embedder.create_embeddings_from_dataframe(
-                preprocessed_df, 
-                self.ticker, 
-                f"{self.start_date}_to_{self.end_date}", 
-                self.data_handler, 
-                config_id=config_id
-            )
-            # embeddings already saved by data_handler in create_embeddings_from_dataframe method
-            return embeddings
-        else:
-            # Handle batch scenario (not shown fully for brevity)
-            # Possibly retrieve embeddings from a previous batch job result on S3.
-            embeddings = self.data_handler.load_data(embeddings_key, data_type='embeddings')
-            return embeddings
+            return df
 
-    def train_and_evaluate_models(self, X, preprocessed_df, time_horizons, model_manager):
-        # Example of using already processed X, no local IO
-        for config in time_horizons:
-            target_name = config['target_name']
-            time_horizon = config['time_horizon']
+        orig_len = len(df)
+        mask = (df[pos_col] >= threshold) | (df[neg_col] >= threshold)
+        filtered_df = df[mask].copy()
+        self.logger.info(
+            f"Filtered low-impact sentiment rows: from {orig_len} to {len(filtered_df)} "
+            f"(threshold={threshold})."
+        )
+        return filtered_df
 
-            self.logger.info(f"Training model for horizon: {time_horizon}")
-            pm = PreprocessingManager(preprocessed_df)
-            pm.df = pm.df.dropna(subset=['Close'])  # ensure no NaNs
-            pm.calculate_dynamic_targets(column_name='Close', target_configs=[config])
+    def train_on_horizons(
+        self,
+        X,
+        df,
+        max_combos=10,
+        save_best_only=True,
+        filter_sentiment=False,
+        sentiment_threshold=0.2
+    ):
+        """
+        Train models across multiple time horizons.
 
-            if target_name not in pm.df.columns:
-                self.logger.error(f"Target '{target_name}' not found.")
+        :param X: Feature DataFrame (aligned embeddings).
+        :param df: Preprocessed DataFrame with target columns.
+        :param max_combos: Max number of horizon combos to train on.
+        :param save_best_only: If True, only saves the best model per horizon in 'models/best_models/'.
+        :param filter_sentiment: If True, remove rows with sentiment < 'sentiment_threshold'.
+        :param sentiment_threshold: Minimum sentiment level to keep row if filter_sentiment=True.
+        :return: List of results with metrics for each horizon.
+        """
+        # Optionally filter out low-impact sentiment rows
+        if filter_sentiment:
+            df = self.filter_low_impact_sentiment(df, threshold=sentiment_threshold)
+            X = X.loc[df.index]  # Keep features aligned
+
+        # Generate horizon combos
+        combos = self.horizon_manager.generate_horizon_combos()
+        combos = combos[:max_combos]
+
+        results = []
+
+        # Initialize tqdm progress bar
+        for combo in tqdm(combos, desc="Training across horizons", unit="horizon"):
+            gather_horizon = combo["gather_name"]
+            predict_horizon = combo["predict_name"]
+            target_col = f"{predict_horizon}_change"  # or "_percentage_change"
+
+            if target_col not in df.columns:
+                self.logger.warning(f"Skipping horizon {predict_horizon}: `{target_col}` missing.")
                 continue
 
-            y = pm.df[target_name].fillna(0).values
+            # Filter out rows without target
+            df_filtered = df.dropna(subset=[target_col])
+            if df_filtered.empty:
+                self.logger.warning(
+                    f"No valid rows after filtering for target_col={target_col}."
+                )
+                continue
 
-            X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.3, random_state=42)
-            X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)
+            X_filtered = X.loc[df_filtered.index]
+            y = df_filtered[target_col].values
 
-            # Train and evaluate model - no local file usage, model artifacts in S3
-            model_manager.train_and_evaluate(X_train, y_train, X_val, y_val, X_test, y_test, timestamps=range(len(y_test)))
+            if X_filtered.empty:
+                self.logger.warning(f"No features left after alignment for {target_col}.")
+                continue
+
+            model_name = f"model_{gather_horizon}_to_{predict_horizon}"
+            self.logger.info(f"Training model: {model_name}")
+            model, metrics = self.model_manager.train_and_evaluate(
+                X_filtered.values, y, model_name
+            )
+
+            # Save final model to best_models if desired
+            if save_best_only and model is not None:
+                # E.g., 'models/best_models/10_minutes_to_30_minutes/model_10_minutes_to_30_minutes.pt'
+                model_stage_dir = os.path.join("models", "best_models", f"{gather_horizon}_to_{predict_horizon}")
+                os.makedirs(model_stage_dir, exist_ok=True)
+                model_path = os.path.join(model_stage_dir, f"{model_name}.pt")
+                self.model_manager.save_model(model, model_path)
+
+            results.append({
+                "gather_horizon": gather_horizon,
+                "predict_horizon": predict_horizon,
+                "mse": metrics["mse"],
+                "mae": metrics["mae"],
+                "r2": metrics["r2"]
+            })
+
+        if results:
+            # Save summary
+            self._save_summary(results)
+        else:
+            self.logger.warning("No horizon training results were produced.")
+
+        return results
+
+
+    def _save_summary(self, results):
+        analysis = ModelAnalysis(self.data_handler)
+        analysis.save_summary_table(results)
+        self.logger.info("Training summary saved.")

@@ -2,7 +2,7 @@ import pandas as pd
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from tqdm import tqdm
-from utils.logger import get_logger
+from src.utils.logger import get_logger
 
 
 class SentimentProcessor:

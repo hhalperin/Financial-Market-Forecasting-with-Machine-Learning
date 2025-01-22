@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from transformers import AutoTokenizer, AutoModel
 from sklearn.decomposition import PCA
 from tqdm import tqdm
-from utils.logger import get_logger
+from src.utils.logger import get_logger
 
 
 class DataEmbedder:
