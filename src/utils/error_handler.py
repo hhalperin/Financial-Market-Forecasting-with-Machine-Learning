@@ -1,10 +1,11 @@
-# src/utils/error_handler.py
-
 import time
 import logging
 from functools import wraps
 
 def handle_api_errors(func):
+    """
+    Decorator that retries an API call up to 3 times with a 5-second delay.
+    """
     @wraps(func)
     def wrapper(*args, **kwargs):
         retries = 3

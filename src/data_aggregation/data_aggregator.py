@@ -1,47 +1,50 @@
-# src/data_aggregation/data_aggregator.py
+"""
+Data Aggregator Module
+
+Aggregates intraday stock price data and news articles for a given ticker and date range.
+Utilizes threading to fetch data concurrently.
+"""
 
 import time
 import pandas as pd
-from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+from typing import Tuple
 from src.utils.logger import get_logger
 from src.data_aggregation.stock_price_data_gatherer import StockPriceDataGatherer
 from src.data_aggregation.news_data_gatherer import NewsDataGatherer
 
 logger = get_logger("DataAggregator")
 
+
 class DataAggregator:
     """
-    Aggregates monthly-chunk intraday price data + news data for a given ticker & date range,
-    then merges them on the 'DateTime' columns if desired.
+    Aggregates price and news data concurrently for a specified stock ticker and date range.
     """
 
-    def __init__(
-        self,
-        ticker,
-        start_date,
-        end_date,
-        interval='1min',
-        data_handler=None,
-        local_mode=False
-    ):
+    def __init__(self, ticker: str, start_date: str, end_date: str,
+                 interval: str = '1min', data_handler=None, local_mode: bool = False) -> None:
         """
-        :param ticker: e.g. 'AAPL'
-        :param start_date: e.g. '2022-01-01'
-        :param end_date:   e.g. '2022-06-01'
-        :param interval:   e.g. '1min', '5min'
-        :param data_handler: not strictly used here, but can be stored if needed
-        :param local_mode: if True, use local environment for API key
-        """
-        self.ticker = ticker
-        self.start_date = start_date
-        self.end_date = end_date
-        self.interval = interval
-        self.data_handler = data_handler
-        self.local_mode = local_mode
+        Initializes the DataAggregator with parameters for data retrieval.
 
-    def _fetch_price_data(self):
+        :param ticker: Stock ticker symbol.
+        :param start_date: Start date in 'YYYY-MM-DD' format.
+        :param end_date: End date in 'YYYY-MM-DD' format.
+        :param interval: Interval for intraday data (default is '1min').
+        :param data_handler: An optional data handler for saving or further processing the data.
+        :param local_mode: Flag to indicate if the application runs in local mode.
         """
-        Uses StockPriceDataGatherer (monthly approach) to fetch intraday data.
+        self.ticker: str = ticker
+        self.start_date: str = start_date
+        self.end_date: str = end_date
+        self.interval: str = interval
+        self.data_handler = data_handler
+        self.local_mode: bool = local_mode
+
+    def _fetch_price_data(self) -> pd.DataFrame:
+        """
+        Fetches intraday price data using the StockPriceDataGatherer.
+
+        :return: DataFrame containing the stock price data.
         """
         gatherer = StockPriceDataGatherer(
             ticker=self.ticker,
@@ -50,12 +53,13 @@ class DataAggregator:
             interval=self.interval,
             local_mode=self.local_mode
         )
-        price_df = gatherer.run()
-        return price_df
+        return gatherer.run()
 
-    def _fetch_news_data(self):
+    def _fetch_news_data(self) -> pd.DataFrame:
         """
-        Uses NewsDataGatherer to fetch up to 1000 articles for [start_date, end_date].
+        Fetches news data using the NewsDataGatherer.
+
+        :return: DataFrame containing the news data.
         """
         gatherer = NewsDataGatherer(
             ticker=self.ticker,
@@ -63,16 +67,20 @@ class DataAggregator:
             end_date=self.end_date,
             local_mode=self.local_mode
         )
-        news_df = gatherer.run()
-        return news_df
+        return gatherer.run()
 
-    def aggregate_data(self):
+    def aggregate_data(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
-        Main method: fetch monthly-chunk intraday + news, then return both.
+        Concurrently fetches price and news data.
+
+        :return: A tuple containing two DataFrames: (price_data, news_data).
         """
         start_time = time.time()
-        price_df = self._fetch_price_data()
-        news_df = self._fetch_news_data()
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_price = executor.submit(self._fetch_price_data)
+            future_news = executor.submit(self._fetch_news_data)
+            price_df = future_price.result()
+            news_df = future_news.result()
         elapsed = time.time() - start_time
-        logger.info(f"Data aggregation completed in {elapsed:.2f}s.")
+        logger.info(f"Data aggregation completed in {elapsed:.2f} seconds.")
         return price_df, news_df

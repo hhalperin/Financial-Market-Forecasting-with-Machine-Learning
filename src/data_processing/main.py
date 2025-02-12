@@ -1,108 +1,117 @@
-# src/data_processing_main.py
+"""
+Main Module for Data Processing
+
+This script loads configuration and data via a DataHandler, processes the data using the DataProcessor,
+and saves the resulting preprocessed and numeric DataFrames.
+"""
 
 import os
-from dotenv import load_dotenv
+from datetime import timedelta
+from typing import Dict
 import pandas as pd
+from src.config import Settings
 from src.utils.logger import get_logger
 from src.utils.data_handler import DataHandler
-from .data_processing import DataProcessor
-from .time_horizon_manager import TimeHorizonManager
-from datetime import timedelta
+from src.data_processing.data_processing import DataProcessor
+from src.data_processing.time_horizon_manager import TimeHorizonManager
 
 logger = get_logger("DataProcessingMain")
 
-def load_config():
+def load_config() -> Dict[str, str]:
     """
-    Load environment variables from .env.
+    Loads configuration from Settings.
     """
-    load_dotenv()
-    local_mode = os.getenv("LOCAL_MODE", "false").lower() == "true"
+    settings = Settings()
+    s3_bucket = settings.s3_bucket.strip()
+    local_mode = settings.local_mode if s3_bucket == "" else False
     storage_mode = "local" if local_mode else "s3"
-
-    ticker = os.getenv("TICKER", "NVDA")
-    start_date = os.getenv("START_DATE", "2022-01-01")
-    end_date = os.getenv("END_DATE", "2024-01-31")
     return {
         "local_mode": local_mode,
         "storage_mode": storage_mode,
-        "ticker": ticker,
-        "start_date": start_date,
-        "end_date": end_date,
-        "s3_bucket": os.getenv("S3_BUCKET", "")  # only used if storage_mode=="s3"
+        "ticker": settings.ticker,
+        "start_date": settings.start_date,
+        "end_date": settings.end_date,
+        "interval": settings.interval,
+        "s3_bucket": s3_bucket
     }
 
-def build_data_handler(config):
+def build_data_handler(config: Dict[str, str]) -> DataHandler:
+    """
+    Initializes the DataHandler based on the storage mode.
+    """
     if config["storage_mode"] == "s3":
         return DataHandler(bucket=config["s3_bucket"], storage_mode="s3")
     else:
         return DataHandler(storage_mode="local")
 
-def print_dataframe_info(label, df):
-    """Utility function to print DataFrame shape and columns."""
+def print_dataframe_info(label: str, df: pd.DataFrame) -> None:
+    """
+    Logs basic information about a DataFrame.
+    """
     logger.info(f"[{label}] shape={df.shape}, columns={list(df.columns)}")
 
-def main():
+def main() -> None:
+    """
+    Main function for the data processing pipeline.
+    """
     config = load_config()
-    logger.info(f"[DataProcessingMain] config={config}")
+    logger.info(f"[DataProcessingMain] config: {config}")
     data_handler = build_data_handler(config)
 
-    # 1) Load aggregated data (price, news)
     ticker = config["ticker"]
     date_range = f"{config['start_date']}_to_{config['end_date']}"
     logger.info(f"Processing for ticker={ticker}, date_range={date_range}")
 
-    def no_op_fetch():
+    # Define a no-op fetch function to be used by the DataHandler (assumes data is already stored).
+    def no_op_fetch() -> pd.DataFrame:
         return pd.DataFrame()
 
-    # The DataHandler callable usage:
+    # Load price and news data using DataHandler.
     price_df = data_handler(ticker, date_range, "price", no_op_fetch, stage='price')
     news_df = data_handler(ticker, date_range, "news", no_op_fetch, stage='news')
 
     print_dataframe_info("Loaded price_df", price_df)
     print_dataframe_info("Loaded news_df", news_df)
 
+    # Validate that essential columns exist.
     if price_df.empty or "DateTime" not in price_df.columns:
-        logger.error("'DateTime' column missing or price_df empty. Check your aggregator output.")
+        logger.error("'DateTime' column missing or price_df is empty. Check aggregator output.")
         return
     if news_df.empty or "time_published" not in news_df.columns:
-        logger.error("'time_published' column missing or news_df empty. Check your aggregator output.")
+        logger.error("'time_published' column missing or news_df is empty. Check aggregator output.")
         return
 
-    # 2) Data Processing
+    # Initialize the DataProcessor and process the pipeline.
     processor = DataProcessor(price_df, news_df)
-
-    # Generate time horizon combos (for later usage)
     thm = TimeHorizonManager()
     combos = thm.generate_horizon_combos()
-    logger.info(f"Generated {len(combos)} combos, e.g. {combos[:5]}...")
+    logger.info(f"Generated {len(combos)} horizon combos, e.g. {combos[:5]}...")
 
-    # We define a large set to extract the max gather for MarketAnalyzer
-    # Example approach: gather all possible minute intervals
     times = [int(c["gather_td"].total_seconds() // 60) for c in combos]
-    max_gather_minutes = max(times) if times else 120  # fallback if combos empty
+    max_gather_minutes = max(times) if times else 120
 
-    # 3) Full pipeline (clean price, merge, sentiment, embedding, etc.)
-    # Note the pipeline calls DataProcessor's internal steps.
-    # process_pipeline expects time_horizons with gather/predict "time_horizon" keys
-    # but we only need the largest gather for the step in MarketAnalyzer below.
-
-    # In your code, we pass a list of dicts with "time_horizon" to process_pipeline.
     time_horizons = [
-        {"target_name": f"{m}_minutes", "time_horizon": timedelta(minutes=m)} for m in range(5, max_gather_minutes+1, 5)
+        {"target_name": f"{m}_minutes", "time_horizon": timedelta(minutes=m)} 
+        for m in range(5, max_gather_minutes + 1, 5)
     ]
-    processed_df = processor.process_pipeline(time_horizons)
+    processed_df: pd.DataFrame = processor.process_pipeline(time_horizons)
+    print_dataframe_info("Final processed DataFrame (raw)", processed_df)
+    print_dataframe_info("Numeric DataFrame for training", processor.numeric_df)
 
-    print_dataframe_info("Final processed DataFrame", processed_df)
+    # Save numeric DataFrame (with embeddings) as CSV.
+    def fetch_numeric() -> pd.DataFrame:
+        return processor.numeric_df
+    _ = data_handler(ticker, date_range, "numeric", fetch_numeric, stage='numeric')
+    logger.info("[DataProcessingMain] Saved numeric data for training.")
 
-    # 4) Save embeddings if generated
-    if processor.embeddings is not None:
-        embeddings_filename = f"{ticker}_embeddings_{date_range}.npy"
-        processor.embedder.save_embeddings(processor.embeddings, embeddings_filename, data_handler, stage='embeddings')
+    # Optionally, save numeric data as a NumPy file.
+    numeric_filename = data_handler.construct_filename(ticker, "numeric", date_range, "npy")
+    data_handler.save_data(processor.numeric_df.values, numeric_filename, data_type="embeddings", stage='numeric')
+    logger.info(f"Numeric embeddings saved to numeric/{numeric_filename}.")
 
-    # 5) Save final preprocessed DataFrame
-    def fetch_preprocessed():
+    # Save final preprocessed data.
+    def fetch_preprocessed() -> pd.DataFrame:
         return processed_df
-
     _ = data_handler(ticker, date_range, "preprocessed", fetch_preprocessed, stage='preprocessed')
     logger.info("[DataProcessingMain] Saved final preprocessed data.")
 
