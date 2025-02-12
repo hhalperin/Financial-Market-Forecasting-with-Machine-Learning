@@ -15,7 +15,7 @@ class TrainingConfig:
     Configuration for a single training experiment.
     """
     # Basic pipeline settings
-    max_combos: int = 100
+    max_combos: int = 20000
     save_best_only: bool = True
 
     # Sentiment filtering settings

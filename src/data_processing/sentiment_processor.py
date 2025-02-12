@@ -53,7 +53,7 @@ class SentimentProcessor:
                 predicted_labels.append(self.model.config.id2label[prob.argmax()])
         return positive_probs, negative_probs, neutral_probs, predicted_labels
 
-    def compute_expected_sentiment(self, df: pd.DataFrame, sentiment_col: str = 'summary_sentiment', reaction_col: str = '5_minutes_change') -> pd.DataFrame:
+    def compute_expected_sentiment(self, df: pd.DataFrame, sentiment_col: str = 'summary_sentiment', reaction_col: str = 'minutes_change') -> pd.DataFrame:
         """
         Computes a rolling expected sentiment based on past sentiments and market reactions.
 

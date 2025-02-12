@@ -95,7 +95,7 @@ def main(sentiment_threshold: float = None) -> None:
     pipeline.train_on_horizons(
         X_df,
         df,  # Raw DataFrame used for target columns.
-        max_combos=10,
+        max_combos=2000,
         save_best_only=True,
         filter_sentiment=True,
         sentiment_threshold=sentiment_threshold,
@@ -106,7 +106,6 @@ def main(sentiment_threshold: float = None) -> None:
 
     # Optional hyperparameter optimization with Optuna.
     def train_single_horizon(combo_dict, X_df, df):
-        single_combo = [combo_dict]
         results = pipeline.train_on_horizons(
             X_df,
             df,
@@ -115,7 +114,8 @@ def main(sentiment_threshold: float = None) -> None:
             filter_sentiment=True,
             sentiment_threshold=sentiment_threshold,
             sentiment_cols=sentiment_cols,
-            sentiment_mode="any"
+            sentiment_mode="any",
+            combos=[combo_dict]  # Use the trial's suggested combo.
         )
         if not results:
             return float("inf")
@@ -135,7 +135,8 @@ def main(sentiment_threshold: float = None) -> None:
             ]
         )
         combo_dict = json.loads(selected_combo_str)
-        target_col = f"{combo_dict['predict_name']}_change"
+        target_col = f"{combo_dict['predict_name']}_percentage_change"
+        logger.info(f"Target column: {target_col}")
         if target_col not in df.columns:
             logger.warning(f"Missing target {target_col}, skipping combo.")
             return float("inf")
@@ -149,7 +150,7 @@ def main(sentiment_threshold: float = None) -> None:
             def callback(study, trial):
                 pbar.update(1)
             study.optimize(optimize, n_trials=n_trials, callbacks=[callback])
-    run_study_with_progress(study, n_trials=5)
+    run_study_with_progress(study, n_trials=2000)
     logger.info(f"Best trial: {study.best_trial.number} with MSE: {study.best_trial.value:.4f}")
     logger.info(f"Best parameters: {study.best_trial.params}")
 

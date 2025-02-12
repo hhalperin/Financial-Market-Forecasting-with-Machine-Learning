@@ -113,7 +113,6 @@ class ModelManager:
         test_r2 = r2_score(y_test, y_test_pred)
         evs = explained_variance_score(y_test, y_test_pred)
 
-        self.logger.info(f"Test Metrics -> MSE: {test_mse:.4f}, MAE: {test_mae:.4f}, R²: {test_r2:.4f}, Explained Variance: {evs:.4f}")
 
         analysis = ModelAnalysis(self.data_handler, model_stage=self.model_stage)
         analysis.generate_all_plots(
@@ -128,6 +127,8 @@ class ModelManager:
 
         baseline_pred = np.full_like(y_test, y_test.mean())
         baseline_val = mean_squared_error(y_test, baseline_pred)
+
+        self.logger.info(f"Test Metrics -> MSE: {test_mse:.4f}, MAE: {test_mae:.4f}, R²: {test_r2:.4f}, Explained Variance: {evs:.4f}")
         self.logger.info(f"Baseline MSE: {baseline_val:.4f}")
 
         metrics = {

@@ -7,6 +7,7 @@ Computes market-related features including price fluctuations and technical indi
 
 import pandas as pd
 import numpy as np
+from tqdm import tqdm
 import talib
 from typing import Any
 from src.utils.logger import get_logger
@@ -40,10 +41,10 @@ class MarketAnalyzer:
         self.data_df['Close'] = pd.to_numeric(self.data_df['Close'], errors='coerce')
 
         new_columns = {}
-        for minutes in range(step, max_gather_minutes + 1, step):
-            self.logger.info(f"Calculating price fluctuation for {minutes} minutes.")
+        for minutes in tqdm(range(step, max_gather_minutes + 1, step), desc="Calculating Price Fluctuations"):
+            # self.logger.info(f"Calculating price fluctuation for {minutes} minutes.")
             shifted_close = self.data_df['Close'].shift(-minutes)
-            new_columns[f"{minutes}_minutes_change"] = shifted_close - self.data_df['Close']
+            #new_columns[f"{minutes}_minutes_change"] = shifted_close - self.data_df['Close']
             new_columns[f"{minutes}_minutes_percentage_change"] = ((shifted_close - self.data_df['Close']) / self.data_df['Close'] * 100)
 
         fluct_df = pd.DataFrame(new_columns, index=self.data_df.index)

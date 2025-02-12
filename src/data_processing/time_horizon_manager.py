@@ -12,7 +12,7 @@ class TimeHorizonManager:
     """
     Generates gather-predict horizon combinations.
     """
-    def __init__(self, max_gather_minutes: int = 2880, max_predict_minutes: int = 10080, step: int = 5) -> None:
+    def __init__(self, max_gather_minutes: int = 1440, max_predict_minutes: int = 5760, step: int = 1) -> None:
         """
         Initializes the TimeHorizonManager.
 
@@ -45,7 +45,7 @@ class TimeHorizonManager:
         self.logger.info(f"Generated {len(combos)} horizon combinations.")
         return combos
 
-    def filter_combos(self, combos: List[Dict[str, Any]], max_combos: int = 2000) -> List[Dict[str, Any]]:
+    def filter_combos(self, combos: List[Dict[str, Any]], max_combos: int = 20000) -> List[Dict[str, Any]]:
         """
         Optionally limits the number of horizon combinations.
 

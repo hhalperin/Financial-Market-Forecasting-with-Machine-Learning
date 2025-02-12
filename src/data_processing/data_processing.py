@@ -192,7 +192,7 @@ class DataProcessor:
         max_gather_minutes = max(int(cfg['time_horizon'].total_seconds() // 60) for cfg in time_horizons)
 
         self.clean_price_data()
-        self.perform_market_analysis(max_gather_minutes, step=5)
+        self.perform_market_analysis(max_gather_minutes, step=1)
         self.preprocess_news()
         self.merge_data_asof(tolerance="5min", direction="backward")
         self.drop_incomplete_news()

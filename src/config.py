@@ -34,12 +34,12 @@ class Settings(BaseSettings):
     # TimeHorizonManager configuration.
     max_gather_minutes: int = 2880     # Maximum gather time in minutes.
     max_predict_minutes: int = 10080   # Maximum prediction time in minutes.
-    time_horizon_step: int = 5         # Step size in minutes.
+    time_horizon_step: int = 1         # Step size in minutes.
 
     # Model training hyperparameters.
     model_learning_rate: float = 0.001
     model_batch_size: int = 32
-    model_epochs: int = 20
+    model_epochs: int = 30
     model_hidden_layers: List[int] = [256, 128, 64]
 
     # Optional training filters (can be used by the model pipeline).
