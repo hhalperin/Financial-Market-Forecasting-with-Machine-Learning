@@ -4,7 +4,7 @@ import boto3
 import numpy as np
 import pandas as pd
 from src.utils.logger import get_logger
-from utils.data_handler import DataHandler
+from src.utils.data_handler import DataHandler
 from models.model_trainer import train_model
 
 logger = get_logger("BatchTraining")

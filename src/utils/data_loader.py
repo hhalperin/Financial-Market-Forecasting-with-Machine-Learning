@@ -1,27 +1,26 @@
-# utils/data_loader_utils.py
-
 import torch
 from torch.utils.data import DataLoader, TensorDataset
+from typing import Union
+import numpy as np
 
-def get_data_loader(X, y, batch_size=32, shuffle=True):
+def get_data_loader(X: Union[np.ndarray, torch.Tensor], y: Union[np.ndarray, torch.Tensor],
+                    batch_size: int = 32, shuffle: bool = True) -> DataLoader:
     """
-    Create a DataLoader from input features and labels.
-
-    Args:
-        X (np.ndarray or torch.Tensor): Input features.
-        y (np.ndarray or torch.Tensor): Target labels.
-        batch_size (int): Batch size for data loading.
-        shuffle (bool): Whether to shuffle the data.
-
-    Returns:
-        DataLoader: A PyTorch DataLoader instance for the input data.
+    Creates a DataLoader from input features and target labels.
+    
+    :param X: Input features as a NumPy array or torch.Tensor.
+    :param y: Target labels as a NumPy array or torch.Tensor.
+    :param batch_size: Batch size for the DataLoader.
+    :param shuffle: Whether to shuffle the data.
+    :return: A PyTorch DataLoader.
     """
-    # Convert inputs to torch tensors if needed
-    X_tensor = torch.tensor(X, dtype=torch.float32) if not isinstance(X, torch.Tensor) else X
-    y_tensor = torch.tensor(y, dtype=torch.float32) if not isinstance(y, torch.Tensor) else y
-
-    # Create dataset and dataloader
+    if not isinstance(X, torch.Tensor):
+        X_tensor = torch.tensor(X, dtype=torch.float32)
+    else:
+        X_tensor = X
+    if not isinstance(y, torch.Tensor):
+        y_tensor = torch.tensor(y, dtype=torch.float32)
+    else:
+        y_tensor = y
     dataset = TensorDataset(X_tensor, y_tensor)
-    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
-
-    return data_loader
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)

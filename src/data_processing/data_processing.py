@@ -1,98 +1,144 @@
+"""
+Data Processing Pipeline Module
+
+The DataProcessor class orchestrates the end-to-end processing of aggregated data.
+It performs the following steps:
+  - Clean and sort price data.
+  - Preprocess news data.
+  - Analyze market features (price fluctuations and technical indicators).
+  - Merge price and news data using as-of joins.
+  - Drop incomplete news records.
+  - Perform sentiment analysis on news texts.
+  - Generate embeddings for text fields (replacing original text with a single embedding column).
+
+Common models (sentiment and embedding) are configurable via the Settings.
+"""
+
 import pandas as pd
 import numpy as np
+from datetime import timedelta
 import talib
-from utils.logger import get_logger
-from data_processing.sentiment_processor import SentimentProcessor
-from data_processing.market_analyzer import MarketAnalyzer
+from typing import List, Dict, Any
+from src.utils.logger import get_logger
+from src.performance_monitor import profile_time
+from .sentiment_processor import SentimentProcessor
+from .market_analyzer import MarketAnalyzer
+from .data_embedder import DataEmbedder
 
 pd.set_option('future.no_silent_downcasting', True)
 
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="huggingface_hub")
+
 class DataProcessor:
     """
-    Handles the end-to-end processing pipeline for merging, analyzing, and preparing data for ML.
+    Processes stock price and news data through a series of steps to create both a raw processed
+    DataFrame and a numeric DataFrame for model training.
     """
-
-    def __init__(self, price_df, news_df, sentiment_model="ProsusAI/finbert"):
+    def __init__(self, price_df: pd.DataFrame, news_df: pd.DataFrame, 
+                 sentiment_model: str = "ProsusAI/finbert", 
+                 embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2") -> None:
         """
-        :param price_df: DataFrame with stock price data.
-        :param news_df: DataFrame with news articles.
-        :param sentiment_model: Hugging Face model for sentiment analysis.
+        Initializes the DataProcessor.
+
+        :param price_df: DataFrame containing stock price data.
+        :param news_df: DataFrame containing news articles.
+        :param sentiment_model: Model name for sentiment analysis.
+        :param embedding_model: Model name for embedding generation.
         """
         self.logger = get_logger(self.__class__.__name__)
         self.price_df = price_df.copy() if price_df is not None else pd.DataFrame()
         self.news_df = news_df.copy() if news_df is not None else pd.DataFrame()
         self.sentiment_processor = SentimentProcessor(model_name=sentiment_model)
-        self.df = None  # Placeholder for processed DataFrame
+        self.embedder = DataEmbedder(model_name=embedding_model)
+        # The merged raw DataFrame.
+        self.df: pd.DataFrame = pd.DataFrame()
+        # Numeric DataFrame for training, with text columns replaced by embedding vectors.
+        self.numeric_df: pd.DataFrame = pd.DataFrame()
 
-    def clean_price_data(self):
-        """
-        Cleans and prepares the price DataFrame:
-        - Converts 'DateTime' to datetime and ensures proper sorting.
-        """
+    def clean_price_data(self) -> None:
+        """Cleans and sorts the price data by 'DateTime'."""
         self.price_df['DateTime'] = pd.to_datetime(self.price_df['DateTime'], errors='coerce')
         self.price_df.dropna(subset=['DateTime'], inplace=True)
         self.price_df.sort_values('DateTime', inplace=True)
         self.logger.info(f"Cleaned price_df. Shape: {self.price_df.shape}")
 
-    def preprocess_news(self):
-        """
-        Prepares the news DataFrame:
-        - Converts 'time_published' to datetime and rounds to the nearest minute.
-        """
-        self.news_df['time_published'] = pd.to_datetime(self.news_df['time_published'], errors='coerce').dt.round('min')
+    def preprocess_news(self) -> None:
+        """Converts 'time_published' to datetime, drops missing values, and sorts the news data."""
+        self.news_df['time_published'] = pd.to_datetime(self.news_df['time_published'], errors='coerce').dt.floor('min')
         self.news_df.dropna(subset=['time_published'], inplace=True)
         self.news_df.sort_values('time_published', inplace=True)
         self.logger.info(f"Preprocessed news_df. Shape: {self.news_df.shape}")
 
-    def perform_market_analysis(self, time_horizons):
+    def perform_market_analysis(self, max_gather_minutes: int, step: int = 5) -> None:
         """
-        Adds technical indicators and price fluctuations to the price DataFrame.
-        :param time_horizons: List of dictionaries specifying time horizons.
+        Enhances the price data with market analysis features using MarketAnalyzer.
+        
+        :param max_gather_minutes: Maximum time horizon (in minutes) for price fluctuation calculations.
+        :param step: Time step (in minutes) for generating fluctuation features.
         """
         analyzer = MarketAnalyzer(self.price_df)
-        self.price_df = analyzer.analyze_market(time_horizons)
-        self.logger.info(f"Market analysis completed. Shape: {self.price_df.shape}")
+        self.price_df = analyzer.analyze_market(max_gather_minutes, step)
+        self.logger.info(f"Market analysis completed. Updated price_df shape: {self.price_df.shape}")
 
-    def merge_data(self):
+    def merge_data_asof(self, tolerance: str = "5min", direction: str = "backward") -> None:
         """
-        Merges price_df and news_df by aligning timestamps and filters to keep rows with valid articles.
+        Merges price and news data using an as-of join based on time proximity.
+
+        :param tolerance: Maximum time difference allowed between price and news data.
+        :param direction: Direction for the as-of join.
         """
-        # Ensure both DataFrames have 'DateTime' as the key
-        self.price_df['DateTime'] = pd.to_datetime(self.price_df['DateTime'], errors='coerce').dt.round('min')
-        self.news_df['time_published'] = pd.to_datetime(self.news_df['time_published'], errors='coerce').dt.round('min')
+        if self.price_df.empty or self.news_df.empty:
+            self.logger.warning("Either price_df or news_df is empty; cannot perform merge.")
+            self.df = pd.DataFrame()
+            return
 
-        # Rename for consistency before merging
-        self.news_df.rename(columns={'time_published': 'DateTime'}, inplace=True)
+        price = self.price_df.copy()
+        news = self.news_df.copy()
+        price['DateTime'] = pd.to_datetime(price['DateTime'])
+        news['time_published'] = pd.to_datetime(news['time_published'])
+        price.sort_values('DateTime', inplace=True)
+        news.sort_values('time_published', inplace=True)
 
-        # Merge data
-        merged_df = pd.merge(
-            self.price_df,
-            self.news_df,
-            on='DateTime',
-            how='outer',
-            suffixes=('', '_news')
+        merged = pd.merge_asof(
+            left=price,
+            right=news,
+            left_on='DateTime',
+            right_on='time_published',
+            direction=direction,
+            tolerance=pd.Timedelta(tolerance)
         )
-        # Retain rows where news data exists
-        merged_df_with_news = merged_df[
-            (merged_df['title'].notna() & (merged_df['title'] != '')) |
-            (merged_df['summary'].notna() & (merged_df['summary'] != ''))
-        ]
-
-        # Log the difference in shape after filtering
-        self.logger.info(f"Merged data shape before filtering: {merged_df.shape}")
-        self.logger.info(f"Merged data shape after filtering for articles: {merged_df_with_news.shape}")
-
-        # Sort the merged DataFrame by DateTime
-        merged_df_with_news = merged_df_with_news.sort_values('DateTime').copy()
-
-
-        self.df = merged_df_with_news
-
-
-    def process_sentiment(self):
+        self.df = merged
+        self.logger.info(f"ASOF-merged data shape: {self.df.shape}")
+        
+    @profile_time(threshold=1.0)
+    def drop_incomplete_news(self) -> None:
         """
-        Performs sentiment analysis on titles and summaries in the DataFrame.
+        Drops rows from the merged DataFrame that are missing essential news fields ('title' and 'summary').
         """
+        if self.df.empty:
+            self.logger.warning("No merged data available for dropping incomplete news.")
+            return
+
+        missing_cols = [c for c in ['title', 'summary'] if c not in self.df.columns]
+        if missing_cols:
+            self.logger.warning(f"Columns missing for dropna: {missing_cols}. Skipping drop.")
+            return
+
+        initial_count = len(self.df)
+        self.df.dropna(subset=['title', 'summary'], how='any', inplace=True)
+        final_count = len(self.df)
+        self.logger.info(f"Dropped {initial_count - final_count} rows with missing 'title' or 'summary'.")
+
+    @profile_time(threshold=1.0)
+    def process_sentiment(self) -> None:
+        """
+        Performs sentiment analysis on the 'title' and 'summary' columns and computes an expected sentiment.
+        """
+        if self.df.empty:
+            self.logger.warning("No data available for sentiment analysis.")
+            return
+
         for col in ['title', 'summary']:
             if col in self.df.columns:
                 texts = self.df[col].fillna('').tolist()
@@ -101,51 +147,58 @@ class DataProcessor:
                 self.df[f"{col}_negative"] = neg
                 self.df[f"{col}_neutral"] = neu
                 self.df[f"{col}_sentiment"] = labels
+
         self.df = self.sentiment_processor.compute_expected_sentiment(self.df)
         self.logger.info("Sentiment analysis completed.")
 
-    def calculate_dynamic_targets(self, column_name, target_configs):
+    @profile_time(threshold=1.0)
+    def generate_embeddings(self, columns_to_embed: List[str] = None) -> None:
         """
-        Creates dynamic target columns based on prediction time horizons.
-        :param column_name: Column to base the target (e.g., 'Close').
-        :param target_configs: List of configurations with prediction horizons.
-        """
-        for config in target_configs:
-            target_name = config['target_name']
-            predict_td = config['time_horizon']
-            minutes = int(predict_td.total_seconds() // 60)
-            self.df[target_name] = self.df[column_name].shift(-minutes) - self.df[column_name]
+        Generates embeddings for specified text columns, replacing them with a single embedding column.
         
-        # Fill missing values and ensure proper dtype inference
-        self.df.fillna(0, inplace=True)
-        self.logger.info("Dynamic targets calculated.")
-
-    def process_pipeline(self, time_horizons, target_configs):
+        :param columns_to_embed: List of column names to embed. Defaults to ['title', 'summary'].
         """
-        Executes the full data processing pipeline.
-        - Cleans price data.
-        - Performs market analysis.
-        - Preprocesses news data.
-        - Merges data.
-        - Performs sentiment analysis.
-        - Calculates dynamic targets.
+        if self.df.empty:
+            self.logger.warning("No data available for embedding generation.")
+            return
+
+        if not columns_to_embed:
+            columns_to_embed = ['title', 'summary', 'authors']
+
+        # Replace each text column with a new column containing its embedding vector.
+        self.numeric_df = self.df.copy()
+        self.numeric_df = self.embedder.embed_columns(self.numeric_df, columns_to_embed)
+        self.logger.info(f"Numeric DataFrame generated for training. Shape: {self.numeric_df.shape}")
+
+    @profile_time(threshold=1.0)
+    def process_pipeline(self, time_horizons: List[Dict[str, Any]]) -> pd.DataFrame:
+        """
+        Executes the full processing pipeline in sequence:
+          1. Clean price data.
+          2. Perform market analysis.
+          3. Preprocess news data.
+          4. Merge price and news data.
+          5. Drop incomplete news rows.
+          6. Process sentiment.
+          7. Generate embeddings.
+
         :param time_horizons: List of time horizon configurations.
-        :param target_configs: List of target configurations.
-        :return: Processed DataFrame.
+        :return: The final processed DataFrame.
         """
-        self.logger.info("Starting data processing pipeline...")
+        self.logger.info("Starting full data processing pipeline...")
+        if not time_horizons:
+            raise ValueError("No time horizons provided; please generate them before processing.")
 
-        # Step 1: Clean and analyze price data
+        max_gather_minutes = max(int(cfg['time_horizon'].total_seconds() // 60) for cfg in time_horizons)
+
         self.clean_price_data()
-        self.perform_market_analysis(time_horizons)
-
-        # Step 2: Preprocess and merge news data
+        self.perform_market_analysis(max_gather_minutes, step=1)
         self.preprocess_news()
-        self.merge_data()
-
-        # Step 3: Perform sentiment analysis and target calculations
+        self.merge_data_asof(tolerance="5min", direction="backward")
+        self.drop_incomplete_news()
         self.process_sentiment()
-        self.calculate_dynamic_targets('Close', target_configs)
+        self.generate_embeddings(columns_to_embed=['title', 'summary'])
 
-        self.logger.info(f"Final processed DataFrame shape: {self.df.shape}")
+        self.logger.info(f"Final processed DataFrame (raw) shape: {self.df.shape}")
+        self.logger.info(f"Final numeric DataFrame (for training) shape: {self.numeric_df.shape}")
         return self.df

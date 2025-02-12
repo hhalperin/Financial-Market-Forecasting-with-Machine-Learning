@@ -1,65 +1,58 @@
-from datetime import timedelta
-import numpy as np
-from utils.logger import get_logger
+"""
+Time Horizon Manager Module
 
+Generates combinations of time horizons for model training and testing.
+"""
+
+from datetime import timedelta
+from typing import List, Dict, Any
+from src.utils.logger import get_logger
 
 class TimeHorizonManager:
     """
-    Generates time horizon pairs for model testing.
-    - Gather time is always less than the prediction time.
-    - Both gather and prediction times are divisible by a given step.
+    Generates gather-predict horizon combinations.
     """
-
-    def __init__(self, max_gather_minutes=2880, max_predict_minutes=10080):
+    def __init__(self, max_gather_minutes: int = 1440, max_predict_minutes: int = 5760, step: int = 1) -> None:
         """
+        Initializes the TimeHorizonManager.
+
         :param max_gather_minutes: Maximum gather time in minutes.
         :param max_predict_minutes: Maximum prediction time in minutes.
+        :param step: Step size (in minutes) for intervals.
         """
         self.logger = get_logger(self.__class__.__name__)
         self.max_gather_minutes = max_gather_minutes
         self.max_predict_minutes = max_predict_minutes
+        self.step = step
 
-    def testing_horizon_combos(self, step=5, max_combos=10):
+    def generate_horizon_combos(self) -> List[Dict[str, Any]]:
         """
-        Generates spaced-out time horizon combos for testing. Ensures divisibility by `step` and uses Python integers.
-        """
-        gather_values = np.linspace(step, self.max_gather_minutes, num=max_combos, endpoint=True, dtype=int)
-        combos = []
+        Generates combinations of gathering and prediction time horizons.
 
-        for g in gather_values:
-            g = int(g - (g % step))  # Ensure divisibility by `step`
-            gather_td = timedelta(minutes=g)
-            predict_td = timedelta(minutes=int(min(g * 2, self.max_predict_minutes) - min(g * 2, self.max_predict_minutes) % step))
-            combos.append({
-                "gather_name": f"{g}_minutes",
-                "gather_td": gather_td,
-                "predict_name": f"{int(predict_td.total_seconds() // 60)}_minutes",
-                "predict_td": predict_td
-            })
-        return combos
-
-    def generate_horizon_combos(self, step=5, max_combos=None):
+        :return: List of dictionaries with keys 'gather_name', 'gather_td', 'predict_name', and 'predict_td'.
         """
-        Dynamically generates key-value time horizon pairs with scaling gather and prediction times.
-        """
-        gather_values = np.arange(step, self.max_gather_minutes + step, step)
-        combos = []
-
-        for g in gather_values:
-            g = g - (g % step)  # Ensure divisibility by `step`
-            min_predict_time = g + step
+        combos: List[Dict[str, Any]] = []
+        for g in range(self.step, self.max_gather_minutes + 1, self.step):
+            min_predict_time = g + self.step
             max_predict_time = min(g * 2, self.max_predict_minutes)
-            predict_values = np.arange(min_predict_time, max_predict_time + step, step)
-
-            for p in predict_values:
-                p = p - (p % step)  # Ensure divisibility by `step`
+            for p in range(min_predict_time, max_predict_time + 1, self.step):
                 combos.append({
                     "gather_name": f"{g}_minutes",
                     "gather_td": timedelta(minutes=g),
                     "predict_name": f"{p}_minutes",
-                    "predict_td": timedelta(minutes=p)
+                    "predict_td": timedelta(minutes=p),
                 })
-                if max_combos and len(combos) >= max_combos:
-                    return combos
-
+        self.logger.info(f"Generated {len(combos)} horizon combinations.")
         return combos
+
+    def filter_combos(self, combos: List[Dict[str, Any]], max_combos: int = 20000) -> List[Dict[str, Any]]:
+        """
+        Optionally limits the number of horizon combinations.
+
+        :param combos: List of generated horizon combinations.
+        :param max_combos: Maximum number of combinations to retain.
+        :return: Filtered list of horizon combinations.
+        """
+        filtered_combos = combos[:max_combos]
+        self.logger.info(f"Filtered to {len(filtered_combos)} horizon combinations.")
+        return filtered_combos

@@ -1,30 +1,37 @@
+"""
+Market Analyzer Module
+
+Computes market-related features including price fluctuations and technical indicators
+(RSI, MACD, ROC) for stock price data.
+"""
+
 import pandas as pd
 import numpy as np
+from tqdm import tqdm
 import talib
-from utils.logger import get_logger
-
+from typing import Any
+from src.utils.logger import get_logger
 
 class MarketAnalyzer:
     """
-    Handles market-related calculations, including:
-    - Price fluctuations over specified time horizons.
-    - Technical indicators like RSI, MACD, and rate of change (ROC).
+    Computes market analysis features for stock price data.
     """
-
-    def __init__(self, data_df):
+    def __init__(self, data_df: pd.DataFrame) -> None:
         """
-        :param data_df: A DataFrame containing stock price data with a 'Close' column.
+        Initializes the MarketAnalyzer.
+
+        :param data_df: DataFrame containing stock price data (requires 'DateTime' and 'Close' columns).
         """
         self.logger = get_logger(self.__class__.__name__)
-        self.data_df = data_df.copy()
+        self.data_df: pd.DataFrame = data_df.copy()
 
-    def calculate_price_fluctuations(self, time_horizons):
+    def calculate_price_fluctuations(self, max_gather_minutes: int, step: int = 5) -> pd.DataFrame:
         """
-        Calculate price changes and percentage changes for given time horizons.
-        :param time_horizons: List of dictionaries, each with:
-                              - 'target_name': Name for the new columns.
-                              - 'time_horizon': timedelta object specifying the horizon.
-        :return: Updated DataFrame with fluctuation columns added.
+        Calculates price changes and percentage changes for various time intervals.
+
+        :param max_gather_minutes: Maximum horizon in minutes.
+        :param step: Step interval in minutes.
+        :return: DataFrame with new fluctuation feature columns added.
         """
         if 'DateTime' not in self.data_df.columns or 'Close' not in self.data_df.columns:
             self.logger.error("Required columns 'DateTime' or 'Close' are missing.")
@@ -33,58 +40,61 @@ class MarketAnalyzer:
         self.data_df.set_index('DateTime', inplace=True, drop=False)
         self.data_df['Close'] = pd.to_numeric(self.data_df['Close'], errors='coerce')
 
-        for config in time_horizons:
-            base_name = config['target_name']
-            minutes = int(config['time_horizon'].total_seconds() // 60)
-
+        new_columns = {}
+        for minutes in tqdm(range(step, max_gather_minutes + 1, step), desc="Calculating Price Fluctuations"):
+            # self.logger.info(f"Calculating price fluctuation for {minutes} minutes.")
             shifted_close = self.data_df['Close'].shift(-minutes)
-            self.data_df[f"{base_name}_change"] = shifted_close - self.data_df['Close']
-            self.data_df[f"{base_name}_percentage_change"] = (
-                (shifted_close - self.data_df['Close']) / self.data_df['Close'] * 100
-            )
+            #new_columns[f"{minutes}_minutes_change"] = shifted_close - self.data_df['Close']
+            new_columns[f"{minutes}_minutes_percentage_change"] = ((shifted_close - self.data_df['Close']) / self.data_df['Close'] * 100)
 
+        fluct_df = pd.DataFrame(new_columns, index=self.data_df.index)
+        self.data_df = pd.concat([self.data_df, fluct_df], axis=1)
         self.data_df.reset_index(drop=True, inplace=True)
-        self.logger.info("Price fluctuations calculated for all specified time horizons.")
+        self.logger.info("Price fluctuations calculated.")
         return self.data_df
 
-    def calculate_technical_indicators(self):
+    def calculate_technical_indicators(self) -> pd.DataFrame:
         """
-        Compute RSI, MACD, and rate-of-change (ROC) for the 'Close' column.
-        :return: Updated DataFrame with technical indicator columns added.
+        Computes RSI, MACD, and rate-of-change (ROC) indicators for the price data.
+
+        :return: DataFrame with technical indicator columns added.
         """
         if 'Close' not in self.data_df.columns:
             self.logger.warning("'Close' column not found. Skipping technical indicator calculations.")
             return self.data_df
 
         self.data_df['Close'] = pd.to_numeric(self.data_df['Close'], errors='coerce')
-
-        # Compute RSI and MACD
         self.logger.info("Calculating RSI and MACD indicators...")
-        self.data_df['RSI'] = talib.RSI(self.data_df['Close'], timeperiod=14)
-        self.data_df['MACD'], self.data_df['MACD_Signal'], self.data_df['MACD_Hist'] = talib.MACD(
-            self.data_df['Close'], fastperiod=12, slowperiod=26, signalperiod=9
-        )
+        rsi = talib.RSI(self.data_df['Close'], timeperiod=14)
+        macd, macd_signal, macd_hist = talib.MACD(self.data_df['Close'], fastperiod=12, slowperiod=26, signalperiod=9)
 
-        # Compute rate of change (ROC) for RSI and MACD_Signal
-        for column in ['RSI', 'MACD_Signal']:
-            if column in self.data_df.columns:
-                self.logger.info(f"Calculating rate of change (ROC) for {column}...")
-                self.data_df[column] = self.data_df[column].fillna(0)
-                self.data_df[f"{column}_roc"] = self.data_df[column].diff().fillna(0)
-            else:
-                self.logger.warning(f"Column {column} not found. Skipping ROC calculation.")
+        # Compute ROC for RSI and MACD_Signal.
+        rsi_roc = pd.Series(rsi).diff().fillna(0)
+        macd_signal_roc = pd.Series(macd_signal).diff().fillna(0)
 
+        technical_df = pd.DataFrame({
+            'RSI': rsi,
+            'MACD': macd,
+            'MACD_Signal': macd_signal,
+            'MACD_Hist': macd_hist,
+            'RSI_roc': rsi_roc,
+            'MACD_Signal_roc': macd_signal_roc
+        }, index=self.data_df.index)
+
+        self.data_df = pd.concat([self.data_df, technical_df], axis=1)
         self.logger.info("Technical indicators calculated successfully.")
         return self.data_df
 
-    def analyze_market(self, time_horizons):
+    def analyze_market(self, max_gather_minutes: int, step: int = 5) -> pd.DataFrame:
         """
-        High-level function to calculate both price fluctuations and technical indicators.
-        :param time_horizons: List of dictionaries specifying fluctuation time horizons.
-        :return: Updated DataFrame with all market analysis columns.
+        Runs both price fluctuation and technical indicator calculations.
+
+        :param max_gather_minutes: Maximum time horizon (in minutes) for fluctuation analysis.
+        :param step: Interval step (in minutes).
+        :return: Updated DataFrame with added market analysis features.
         """
         self.logger.info("Starting market analysis...")
-        self.calculate_price_fluctuations(time_horizons)
+        self.calculate_price_fluctuations(max_gather_minutes, step)
         self.calculate_technical_indicators()
         self.logger.info("Market analysis completed.")
         return self.data_df
