@@ -1,7 +1,8 @@
 """
 Stock Predictor Module
 
-Defines a simple feedforward neural network for stock price change prediction.
+Defines a simple feedforward neural network for regression.
+The network architecture is configured via a list of hidden layer sizes and a dropout rate.
 """
 
 import torch
@@ -15,7 +16,6 @@ class StockPredictor(nn.Module):
     def __init__(self, input_size: int, hidden_layers: List[int], output_size: int = 1, dropout_rate: float = 0.2) -> None:
         """
         Initializes the StockPredictor.
-
         :param input_size: Number of input features.
         :param hidden_layers: List specifying the number of units in each hidden layer.
         :param output_size: Number of output units (default is 1 for regression).

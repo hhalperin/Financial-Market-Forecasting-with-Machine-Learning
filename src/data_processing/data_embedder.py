@@ -29,7 +29,7 @@ class DataEmbedder:
       - use_pca: Flag to apply PCA.
     """
     def __init__(self, 
-                 model_name: str = "sentence-transformers/all-MiniLM-L6-v2", 
+                 model_name: str = "gme-qwen2-vl2b", 
                  n_components: int = 128, 
                  batch_size: int = 8, 
                  use_pca: bool = True) -> None:

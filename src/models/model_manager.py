@@ -1,8 +1,13 @@
 """
 Model Manager Module
 
-Manages the creation, training, and evaluation of PyTorch models.
-Includes early stopping functionality and supports hyperparameter tuning via Optuna.
+Manages creation, training, and evaluation of PyTorch models.
+Improvements:
+  - Uses SmoothL1Loss (Huber loss) if configured.
+  - Adds weight decay to the optimizer.
+  - Incorporates a learning rate scheduler.
+  - Passes dropout rate from config or trial to the model.
+  - Computes additional regression metrics.
 """
 
 import torch
@@ -14,6 +19,7 @@ from .stock_predictor import StockPredictor
 from .model_analysis import ModelAnalysis
 from src.utils.logger import get_logger
 from typing import Tuple, Any
+from src.config import settings  # Import global settings
 
 class EarlyStopping:
     """
@@ -37,7 +43,7 @@ class EarlyStopping:
 
 class ModelManager:
     """
-    Handles the training and evaluation of the stock prediction model.
+    Handles training and evaluation of the stock prediction model.
     """
     def __init__(
         self,
@@ -45,7 +51,7 @@ class ModelManager:
         hidden_layers: list = None,
         learning_rate: float = 0.001,
         batch_size: int = 32,
-        epochs: int = 50,
+        epochs: int = 100,
         data_handler: Any = None,
         model_stage: str = "models",
         use_time_split: bool = True
@@ -63,10 +69,7 @@ class ModelManager:
         self.logger.info(f"Using device: {self.device}")
 
     def train_and_evaluate(self, X: np.ndarray, y: np.ndarray, model_name: str, trial=None) -> Tuple[Any, dict]:
-        """
-        Trains the model on the provided data and evaluates its performance.
-        If 'trial' is provided, hyperparameters are tuned via Optuna.
-        """
+        # Create time-aware splits if necessary.
         if self.use_time_split:
             if hasattr(X, "index"):
                 X = X.sort_index()
@@ -83,24 +86,31 @@ class ModelManager:
         if trial:
             learning_rate = trial.suggest_float("learning_rate", 1e-5, 1e-1, log=True)
             n_layers = trial.suggest_int("n_layers", 1, 3)
-            hidden_layers = []
-            for i in range(n_layers):
-                hidden_layers.append(trial.suggest_int(f"n_units_l{i}", 32, 512, step=32))
+            hidden_layers = [trial.suggest_int(f"n_units_l{i}", 32, 512, step=32) for i in range(n_layers)]
             batch_size = trial.suggest_int("batch_size", 16, 128, step=16)
+            dropout_rate = trial.suggest_float("dropout_rate", 0.0, 0.5)
         else:
             learning_rate = self.learning_rate
             hidden_layers = self.hidden_layers
             batch_size = self.batch_size
+            dropout_rate = settings.model_dropout_rate
 
         train_loader = self._get_dataloader(X_train, y_train, batch_size)
         val_loader = self._get_dataloader(X_val, y_val, batch_size)
 
-        model = StockPredictor(self.input_size, hidden_layers).to(self.device)
-        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-        loss_fn = torch.nn.MSELoss()
+        # Initialize model with the specified dropout_rate.
+        model = StockPredictor(self.input_size, hidden_layers, dropout_rate=dropout_rate).to(self.device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=settings.model_weight_decay)
+        if settings.model_loss_function.lower() == "smoothl1":
+            loss_fn = torch.nn.SmoothL1Loss()
+        else:
+            loss_fn = torch.nn.MSELoss()
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=settings.lr_scheduler_factor, patience=settings.lr_scheduler_patience
+        )
 
         training_history, best_model_state, best_val_mse = self._train_model(
-            model, train_loader, val_loader, optimizer, loss_fn
+            model, train_loader, val_loader, optimizer, loss_fn, scheduler
         )
 
         if trial:
@@ -112,7 +122,14 @@ class ModelManager:
         test_mae = mean_absolute_error(y_test, y_test_pred)
         test_r2 = r2_score(y_test, y_test_pred)
         evs = explained_variance_score(y_test, y_test_pred)
-
+        eps = 1e-8
+        denom = np.where(np.abs(y_test) < eps, eps, y_test)
+        mape = np.mean(np.abs((y_test - y_test_pred) / denom)) * 100
+        tol = getattr(settings, "regression_accuracy_tolerance", 0.1)
+        relative_errors = np.abs((y_test - y_test_pred) / denom)
+        regression_accuracy = np.mean(relative_errors < tol) * 100
+        slope, intercept = np.polyfit(y_test, y_test_pred, 1)
+        line_of_best_fit_error = abs(slope - 1) + abs(intercept)
 
         analysis = ModelAnalysis(self.data_handler, model_stage=self.model_stage)
         analysis.generate_all_plots(
@@ -127,8 +144,9 @@ class ModelManager:
 
         baseline_pred = np.full_like(y_test, y_test.mean())
         baseline_val = mean_squared_error(y_test, baseline_pred)
-
-        self.logger.info(f"Test Metrics -> MSE: {test_mse:.4f}, MAE: {test_mae:.4f}, R²: {test_r2:.4f}, Explained Variance: {evs:.4f}")
+        self.logger.info(f"Test Metrics -> MSE: {test_mse:.4f}, MAE: {test_mae:.4f}, R²: {test_r2:.4f}, "
+                         f"Explained Variance: {evs:.4f}, MAPE: {mape:.2f}%, Regression Accuracy: {regression_accuracy:.2f}%, "
+                         f"Line Fit Error: {line_of_best_fit_error:.4f}")
         self.logger.info(f"Baseline MSE: {baseline_val:.4f}")
 
         metrics = {
@@ -136,11 +154,14 @@ class ModelManager:
             "mae": test_mae,
             "r2": test_r2,
             "explained_variance": evs,
+            "mape": mape,
+            "regression_accuracy": regression_accuracy,
+            "line_of_best_fit_error": line_of_best_fit_error,
             "training_history": training_history,
         }
         return model, metrics
 
-    def _train_model(self, model, train_loader, val_loader, optimizer, loss_fn) -> Tuple[dict, dict, float]:
+    def _train_model(self, model, train_loader, val_loader, optimizer, loss_fn, scheduler) -> Tuple[dict, dict, float]:
         training_history = {"train_loss": [], "val_loss": []}
         early_stopper = EarlyStopping(patience=5, min_delta=0.0)
         best_model_state = None
@@ -153,7 +174,8 @@ class ModelManager:
                 y_batch = y_batch.to(self.device)
                 optimizer.zero_grad()
                 y_pred = model(X_batch)
-                loss = loss_fn(y_pred.squeeze(), y_batch)
+                # Use view(-1) to ensure 1D tensors for loss computation.
+                loss = loss_fn(y_pred.view(-1), y_batch.view(-1))
                 loss.backward()
                 optimizer.step()
                 running_loss += loss.item()
@@ -167,17 +189,21 @@ class ModelManager:
                     X_batch = X_batch.to(self.device)
                     y_batch = y_batch.to(self.device)
                     preds = model(X_batch)
-                    loss = loss_fn(preds.squeeze(), y_batch)
+                    loss = loss_fn(preds.view(-1), y_batch.view(-1))
                     val_loss += loss.item()
-                    y_val_true.append(y_batch.cpu().numpy())
-                    y_val_pred.append(preds.squeeze().cpu().numpy())
+                    # Ensure both predictions and targets are 1D arrays.
+                    y_val_true.append(y_batch.cpu().numpy().reshape(-1))
+                    y_val_pred.append(preds.cpu().numpy().reshape(-1))
             avg_val_loss = val_loss / len(val_loader)
+            scheduler.step(avg_val_loss)
+            # Concatenate along axis 0.
             y_val_true = np.concatenate(y_val_true)
             y_val_pred = np.concatenate(y_val_pred)
-            val_mse = mean_squared_error(y_val_true, y_val_pred)
+            val_mse = np.mean((y_val_true - y_val_pred) ** 2)
             training_history["train_loss"].append(avg_train_loss)
             training_history["val_loss"].append(avg_val_loss)
-            self.logger.info(f"Epoch {epoch+1}/{self.epochs} -> Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}, Val MSE: {val_mse:.4f}")
+            self.logger.info(f"Epoch {epoch+1}/{self.epochs} -> Train Loss: {avg_train_loss:.4f}, "
+                             f"Val Loss: {avg_val_loss:.4f}, Val MSE: {val_mse:.4f}")
             if val_mse < best_val_mse:
                 best_val_mse = val_mse
                 best_model_state = model.state_dict()
@@ -192,13 +218,12 @@ class ModelManager:
         X_t = torch.tensor(X, dtype=torch.float32).to(self.device)
         with torch.no_grad():
             preds = model(X_t)
-        return preds.squeeze().cpu().numpy()
+        return preds.view(-1).cpu().numpy()
 
     def _get_dataloader(self, X, y, batch_size: int = None) -> DataLoader:
-        from torch.utils.data import DataLoader, TensorDataset
         batch_size = batch_size or self.batch_size
-        return DataLoader(TensorDataset(torch.tensor(X, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)), batch_size=batch_size, shuffle=True)
+        return DataLoader(TensorDataset(torch.tensor(X, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)),
+                          batch_size=batch_size, shuffle=True)
 
     def save_model(self, model, filepath: str) -> None:
         torch.save(model.state_dict(), filepath)
-        self.logger.info(f"Model saved to {filepath}.")

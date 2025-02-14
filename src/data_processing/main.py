@@ -85,7 +85,7 @@ def main() -> None:
     processor = DataProcessor(price_df, news_df)
     thm = TimeHorizonManager()
     combos = thm.generate_horizon_combos()
-    logger.info(f"Generated {len(combos)} horizon combos, e.g. {combos[:5]}...")
+    logger.info(f"Generated {len(combos)} horizon combos")
 
     times = [int(c["gather_td"].total_seconds() // 60) for c in combos]
     max_gather_minutes = max(times) if times else 120
