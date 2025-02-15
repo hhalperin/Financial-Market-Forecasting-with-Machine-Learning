@@ -19,7 +19,7 @@ from .stock_predictor import StockPredictor
 from .model_analysis import ModelAnalysis
 from src.utils.logger import get_logger
 from typing import Tuple, Any
-from src.config import settings  # Import global settings
+from src.config import settings
 
 class EarlyStopping:
     """
@@ -79,7 +79,6 @@ class ModelManager:
             X_train, X_val, X_test = X[:train_size], X[train_size:val_size], X[val_size:]
             y_train, y_val, y_test = y[:train_size], y[train_size:val_size], y[val_size:]
         else:
-            from sklearn.model_selection import train_test_split
             X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
             X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.2, random_state=42)
 
@@ -101,10 +100,7 @@ class ModelManager:
         # Initialize model with the specified dropout_rate.
         model = StockPredictor(self.input_size, hidden_layers, dropout_rate=dropout_rate).to(self.device)
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=settings.model_weight_decay)
-        if settings.model_loss_function.lower() == "smoothl1":
-            loss_fn = torch.nn.SmoothL1Loss()
-        else:
-            loss_fn = torch.nn.MSELoss()
+        loss_fn = torch.nn.SmoothL1Loss() if settings.model_loss_function.lower() == "smoothl1" else torch.nn.MSELoss()
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode='min', factor=settings.lr_scheduler_factor, patience=settings.lr_scheduler_patience
         )
@@ -131,6 +127,13 @@ class ModelManager:
         slope, intercept = np.polyfit(y_test, y_test_pred, 1)
         line_of_best_fit_error = abs(slope - 1) + abs(intercept)
 
+        # Compute additional metrics using our ModelSummary helper functions.
+        from .model_summary import ModelSummary  # import here to avoid circular imports if needed
+        temp_summary = ModelSummary(self.data_handler)
+        directional_accuracy = temp_summary.calculate_directional_accuracy(y_test_pred, y_test)
+        percentage_over_prediction = temp_summary.calculate_percentage_over_prediction(y_test_pred, y_test)
+        pearson_corr, spearman_corr = temp_summary.calculate_pearson_spearman(y_test_pred, y_test)
+
         analysis = ModelAnalysis(self.data_handler, model_stage=self.model_stage)
         analysis.generate_all_plots(
             training_history=training_history,
@@ -146,7 +149,9 @@ class ModelManager:
         baseline_val = mean_squared_error(y_test, baseline_pred)
         self.logger.info(f"Test Metrics -> MSE: {test_mse:.4f}, MAE: {test_mae:.4f}, R²: {test_r2:.4f}, "
                          f"Explained Variance: {evs:.4f}, MAPE: {mape:.2f}%, Regression Accuracy: {regression_accuracy:.2f}%, "
-                         f"Line Fit Error: {line_of_best_fit_error:.4f}")
+                         f"Line Fit Error: {line_of_best_fit_error:.4f}, Directional Accuracy: {directional_accuracy}, "
+                         f"Percentage Over Prediction: {percentage_over_prediction}, "
+                         f"Pearson: {pearson_corr}, Spearman: {spearman_corr}")
         self.logger.info(f"Baseline MSE: {baseline_val:.4f}")
 
         metrics = {
@@ -157,6 +162,10 @@ class ModelManager:
             "mape": mape,
             "regression_accuracy": regression_accuracy,
             "line_of_best_fit_error": line_of_best_fit_error,
+            "directional_accuracy": directional_accuracy,
+            "percentage_over_prediction": percentage_over_prediction,
+            "pearson_correlation": pearson_corr,
+            "spearman_correlation": spearman_corr,
             "training_history": training_history,
         }
         return model, metrics
@@ -174,7 +183,6 @@ class ModelManager:
                 y_batch = y_batch.to(self.device)
                 optimizer.zero_grad()
                 y_pred = model(X_batch)
-                # Use view(-1) to ensure 1D tensors for loss computation.
                 loss = loss_fn(y_pred.view(-1), y_batch.view(-1))
                 loss.backward()
                 optimizer.step()
@@ -191,12 +199,10 @@ class ModelManager:
                     preds = model(X_batch)
                     loss = loss_fn(preds.view(-1), y_batch.view(-1))
                     val_loss += loss.item()
-                    # Ensure both predictions and targets are 1D arrays.
                     y_val_true.append(y_batch.cpu().numpy().reshape(-1))
                     y_val_pred.append(preds.cpu().numpy().reshape(-1))
             avg_val_loss = val_loss / len(val_loader)
             scheduler.step(avg_val_loss)
-            # Concatenate along axis 0.
             y_val_true = np.concatenate(y_val_true)
             y_val_pred = np.concatenate(y_val_pred)
             val_mse = np.mean((y_val_true - y_val_pred) ** 2)

@@ -2,14 +2,13 @@
 Model Analysis Module
 
 This module handles model evaluation and analysis. It computes various metrics (MSE, MAE, R², etc.),
-generates plots (such as learning curves, actual vs. predicted plots, and SHAP feature importance), and saves
+generates plots (such as learning curves, actual vs. predicted plots, and residuals), and saves
 summaries and model details.
 """
 
 import os
 import io
 import json
-
 import pandas as pd
 import numpy as np
 import seaborn as sns
@@ -18,16 +17,11 @@ from src.utils.logger import get_logger
 import torch
 from typing import Any, Optional
 from scipy import stats
-
 import matplotlib
-matplotlib.use('Agg')  # Set headless backend
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-
 class ModelAnalysis:
-    """
-    Provides methods for analyzing a trained model.
-    """
     def __init__(self, data_handler: Any, model_stage: str = "models", model_name: str = "model") -> None:
         self.data_handler = data_handler
         self.model_stage = model_stage
@@ -168,10 +162,8 @@ class ModelAnalysis:
         train_losses = np.array(training_history["train_loss"])
         val_losses = np.array(training_history["val_loss"])
         window = 3
-
         def rolling_std(x):
             return np.array([np.std(x[max(0, i - window + 1):i + 1]) for i in range(len(x))])
-
         train_std = rolling_std(train_losses)
         val_std = rolling_std(val_losses)
         epochs = range(1, len(train_losses) + 1)
@@ -233,7 +225,6 @@ class ModelAnalysis:
     def _save_figure(self, figure_filename: str) -> None:
         try:
             buffer = io.BytesIO()
-            # Save the figure at a lower DPI to reduce memory usage.
             plt.savefig(buffer, format="png", dpi=100)
             buffer.seek(0)
             self.data_handler.save_figure_bytes(buffer.read(), figure_filename, stage=self.model_stage)
@@ -243,8 +234,6 @@ class ModelAnalysis:
             plt.close('all')
             import gc
             gc.collect()
-
-
 
     def save_training_data(self, training_df: pd.DataFrame, filename: str) -> None:
         self.data_handler.save_dataframe(training_df, filename, stage=self.model_stage)
@@ -270,3 +259,8 @@ class ModelAnalysis:
         }
         summary_filename = f"{self.model_name}_model_summary.json"
         self.data_handler.save_json(summary, summary_filename, stage=self.model_stage)
+
+    def compute_feature_correlations(self, X_df: pd.DataFrame, y: pd.Series) -> pd.DataFrame:
+        df = X_df.copy()
+        df['target'] = y
+        return df.corr()

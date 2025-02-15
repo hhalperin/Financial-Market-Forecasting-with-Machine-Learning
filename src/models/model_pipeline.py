@@ -27,7 +27,7 @@ from typing import Any, Optional, List, Dict
 from src.config import settings
 from sklearn.preprocessing import RobustScaler, StandardScaler, MinMaxScaler
 from src.utils.logger import get_logger
-from .model_summary import ModelSummary  # <-- Import the new ModelSummary class
+from .model_summary import ModelSummary
 
 class ModelPipeline:
     def __init__(self, model_manager: Any, data_handler: Any, horizon_manager: Any) -> None:
@@ -35,8 +35,7 @@ class ModelPipeline:
         self.data_handler = data_handler
         self.horizon_manager = horizon_manager
         self.logger = get_logger(self.__class__.__name__)
-
-        # Create a summary manager to handle all "goated" model tracking & summary logic
+        # Create a summary manager to handle all "goated" model tracking & summary logic.
         self.summary_manager = ModelSummary(data_handler=self.data_handler)
 
     def advanced_filter_sentiment(self, df: pd.DataFrame, sentiment_columns: list = None,
@@ -79,10 +78,6 @@ class ModelPipeline:
         return X[keep_cols]
 
     def _skip_training_if_small_change(self, df: pd.DataFrame, target_col: str, threshold: float = 0.01) -> bool:
-        """
-        Skips training if the average absolute change is below a threshold, 
-        implying the target doesn't vary enough to be interesting.
-        """
         if target_col not in df.columns:
             return True
         avg_abs_change = df[target_col].abs().mean()
@@ -98,21 +93,13 @@ class ModelPipeline:
             return os.path.join(self.data_handler.base_data_dir, stage_name)
 
     def _get_starting_index(self, combos: List[Dict[str, Any]]) -> int:
-        """
-        Checks the data/models/temp directory for candidate model folders.
-        If any exist, finds the latest candidate by modification time and parses its name.
-        Then reads the horizons CSV to locate the matching row, returning the next index to process.
-        Returns 0 if nothing is found.
-        """
         temp_dir = os.path.join(self.data_handler.base_data_dir, "models", "temp")
         if not os.path.exists(temp_dir) or not os.listdir(temp_dir):
             self.logger.info("Temp directory is empty. Starting from the first horizon.")
             return 0
-
         candidate_names = [d for d in os.listdir(temp_dir) if d.startswith("model_") and "_to_" in d]
         if not candidate_names:
             return 0
-
         latest_candidate = max(candidate_names, key=lambda d: os.path.getmtime(os.path.join(temp_dir, d)))
         try:
             parts = latest_candidate.split("_to_")
@@ -121,21 +108,29 @@ class ModelPipeline:
         except Exception as e:
             self.logger.error(f"Error parsing candidate folder name {latest_candidate}: {e}")
             return 0
-
         horizons_csv_path = os.path.join(self.data_handler.base_data_dir, "models", "horizons", "horizons.csv")
         if not os.path.exists(horizons_csv_path):
             self.logger.warning(f"Horizons CSV not found at {horizons_csv_path}. Starting from index 0.")
             return 0
-
         horizons_df = pd.read_csv(horizons_csv_path)
-        match = horizons_df[(horizons_df["gather_name"] == gather) &
-                            (horizons_df["predict_name"] == predict)]
+        match = horizons_df[(horizons_df["gather_name"] == gather) & (horizons_df["predict_name"] == predict)]
         if match.empty:
             self.logger.warning(f"Candidate {latest_candidate} not found in horizons CSV. Starting from index 0.")
             return 0
         last_index = match.index[0]
         self.logger.info(f"Found latest candidate in horizons CSV at index {last_index}. Starting from next index.")
         return last_index + 1
+
+    def _recursive_update_goated(self, metric_updates: List[tuple]) -> None:
+        """Recursively update goated model metrics.
+           Each tuple is (metric_name, global_best_info).
+        """
+        if not metric_updates:
+            return
+        metric_name, global_info = metric_updates[0]
+        if global_info is not None:
+            self.summary_manager.update_goated_model_metric(metric_name, global_info)
+        self._recursive_update_goated(metric_updates[1:])
 
     def train_on_horizons(
         self,
@@ -147,26 +142,14 @@ class ModelPipeline:
         sentiment_threshold: float = 0.35,
         sentiment_cols: list = None,
         sentiment_mode: str = "any",
-        combos: Optional[list] = None
+        combos: Optional[List[Dict[str, Any]]] = None
     ) -> list:
-        """
-        Main training loop over multiple horizon combos.
-        Applies sentiment filtering if desired, outlier filtering, scaling, etc.
-        Stores best model & summary for each horizon, and also tracks 'goated' models globally.
-        """
         if filter_sentiment and sentiment_cols:
-            df = self.advanced_filter_sentiment(
-                df,
-                sentiment_columns=sentiment_cols,
-                threshold=sentiment_threshold,
-                mode=sentiment_mode
-            )
+            df = self.advanced_filter_sentiment(df, sentiment_columns=sentiment_cols,
+                                                threshold=sentiment_threshold, mode=sentiment_mode)
             X = X.loc[df.index]
-
         if combos is None:
             combos = self.horizon_manager.generate_horizon_combos()[:max_combos]
-
-        # Resume training if partial results exist in the temp folder
         start_index = self._get_starting_index(combos)
         if start_index > 0:
             self.logger.info(f"Resuming training from horizon combo index {start_index}.")
@@ -175,10 +158,9 @@ class ModelPipeline:
             self.logger.info("Starting training from the first horizon combo.")
 
         results = []
-
         for idx, combo in enumerate(tqdm(combos, desc="Training across horizons", unit="horizon")):
-            gather = combo["gather_name"]   # e.g. "45_minutes"
-            predict = combo["predict_name"] # e.g. "50_minutes"
+            gather = combo["gather_name"]
+            predict = combo["predict_name"]
             target_col = f"{predict}_percentage_change"
             if target_col not in df.columns:
                 continue
@@ -187,7 +169,6 @@ class ModelPipeline:
             if df_f.empty:
                 continue
 
-            # IQR-based outlier filtering
             q1 = df_f[target_col].quantile(0.25)
             q3 = df_f[target_col].quantile(0.75)
             iqr = q3 - q1
@@ -197,14 +178,12 @@ class ModelPipeline:
             if df_f.empty:
                 continue
 
-            # z-score filtering
             from scipy.stats import zscore
             z_scores = zscore(df_f[target_col])
             df_f = df_f[(abs(z_scores) < 3.0)]
             if df_f.empty:
                 self.logger.warning(
-                    f"All data removed (z-score filter) for target {target_col}. "
-                    f"Skipping horizon {gather} to {predict}."
+                    f"All data removed (z-score filter) for target {target_col}. Skipping horizon {gather} to {predict}."
                 )
                 continue
 
@@ -219,12 +198,9 @@ class ModelPipeline:
 
             X_f_numeric = X_f.select_dtypes(include=["number"])
             if X_f_numeric.shape[1] == 0:
-                self.logger.warning(
-                    f"No numeric features remain for horizon '{gather}' -> '{predict}'. Skipping."
-                )
+                self.logger.warning(f"No numeric features remain for horizon '{gather}' -> '{predict}'. Skipping.")
                 continue
 
-            # Feature scaling (if configured in settings)
             if settings.use_scaler:
                 if settings.scaler_type == "robust":
                     scaler = RobustScaler()
@@ -241,15 +217,10 @@ class ModelPipeline:
                         columns=X_f_numeric.columns
                     )
 
-            self.logger.info(
-                f"Training with {X_f_numeric.shape[1]} numeric features: {list(X_f_numeric.columns)}. "
-                f"Target Column: {target_col}"
-            )
-
+            self.logger.info(f"Training with {X_f_numeric.shape[1]} numeric features: {list(X_f_numeric.columns)}. Target Column: {target_col}")
             candidate_model_name = f"model_{gather}_to_{predict}"
             self.logger.info(f"Training model: {candidate_model_name}")
 
-            # Final destination for the best model
             dest_folder_relative = os.path.join("models", "best_models", predict, candidate_model_name)
             dest_dir = self._resolve_local_path(dest_folder_relative)
             if os.path.exists(dest_dir):
@@ -260,11 +231,9 @@ class ModelPipeline:
                     self.logger.error(f"Failed to clear folder: {e}")
             os.makedirs(dest_dir, exist_ok=True)
 
-            # Set a temporary candidate folder for saving candidate files
             old_stage = self.model_manager.model_stage
             temp_candidate_folder = os.path.join(old_stage, "temp", candidate_model_name)
             self.model_manager.model_stage = temp_candidate_folder
-
             old_input_size = self.model_manager.input_size
             self.model_manager.input_size = X_f_numeric.shape[1]
 
@@ -278,9 +247,6 @@ class ModelPipeline:
             for arch in candidate_architectures:
                 self.logger.info(f"Trying architecture {arch} for model {candidate_model_name}")
                 self.model_manager.hidden_layers = arch
-
-                # The train_and_evaluate call should return predictions + metrics 
-                # that include your new directional metrics if you implement them there.
                 candidate_model, candidate_metrics = self.model_manager.train_and_evaluate(
                     X_f_numeric.values,
                     y,
@@ -289,9 +255,6 @@ class ModelPipeline:
                 if candidate_model is None:
                     continue
 
-                # Incorporate the two new metrics into the candidate summary.
-                # (If they're computed in candidate_metrics, just store them. Otherwise, you can compute them here
-                #  using self.summary_manager.calculate_directional_accuracy(...) etc.)
                 candidate_summary = {
                     "architecture": arch,
                     "metrics": {
@@ -303,54 +266,42 @@ class ModelPipeline:
                         "regression_accuracy": candidate_metrics.get("regression_accuracy"),
                         "line_of_best_fit_error": candidate_metrics.get("line_of_best_fit_error"),
                         "directional_accuracy": candidate_metrics.get("directional_accuracy"),
-                        "percentage_over_prediction": candidate_metrics.get("percentage_over_prediction")
+                        "percentage_over_prediction": candidate_metrics.get("percentage_over_prediction"),
+                        "pearson_correlation": candidate_metrics.get("pearson_correlation"),
+                        "spearman_correlation": candidate_metrics.get("spearman_correlation")
                     }
                 }
                 candidate_summaries.append(candidate_summary)
-
-                if (best_candidate_metrics is None or
-                        candidate_metrics["line_of_best_fit_error"] < best_candidate_metrics["line_of_best_fit_error"]):
+                if best_candidate_metrics is None or candidate_metrics["line_of_best_fit_error"] < best_candidate_metrics["line_of_best_fit_error"]:
                     best_candidate_model = candidate_model
                     best_candidate_metrics = candidate_metrics
                     best_architecture = arch
 
-            # Restore original model_manager settings
             self.model_manager.hidden_layers = original_hidden_layers
             self.model_manager.input_size = old_input_size
 
             if best_candidate_model is None:
-                self.logger.warning(
-                    f"No valid model trained for horizon {gather} to {predict}. Skipping."
-                )
+                self.logger.warning(f"No valid model trained for horizon {gather} to {predict}. Skipping.")
                 self.model_manager.model_stage = old_stage
                 continue
 
             model = best_candidate_model
             metrics = best_candidate_metrics
-            self.logger.info(
-                f"Best architecture for {candidate_model_name} is {best_architecture} "
-                f"with Line Fit Error {metrics['line_of_best_fit_error']:.4f}"
-            )
+            self.logger.info(f"Best architecture for {candidate_model_name} is {best_architecture} with Line Fit Error {metrics['line_of_best_fit_error']:.4f}")
 
             if save_best_only:
-                # Save best model
                 model_dest_path = os.path.join(dest_dir, "best_model.pt")
                 self.model_manager.save_model(model, model_dest_path)
-
-                # Save training data used
                 train_df = X_f_numeric.copy()
                 train_df[target_col] = y
                 training_data_filename = "best_model_training_data.csv"
                 self.data_handler.save_dataframe(train_df, training_data_filename, stage=dest_folder_relative)
-                self.logger.info(
-                    f"Saved training data to {training_data_filename} in stage {dest_folder_relative}."
-                )
+                self.logger.info(f"Saved training data to {training_data_filename} in stage {dest_folder_relative}.")
 
-                # Copy plots from temp folder if any
                 temp_candidate_dir = self._resolve_local_path(temp_candidate_folder)
                 if os.path.exists(temp_candidate_dir):
                     for file in os.listdir(temp_candidate_dir):
-                        if file.lower().endswith(".png"):
+                        if file.lower().endswith(".png") or file.lower().endswith(".json"):
                             src_file = os.path.join(temp_candidate_dir, file)
                             dest_file = os.path.join(dest_dir, file)
                             try:
@@ -358,7 +309,6 @@ class ModelPipeline:
                             except Exception as e:
                                 self.logger.error(f"Failed to copy plot {file}: {e}")
 
-                # Create the best candidate summary
                 best_candidate_summary = {
                     "architecture": best_architecture,
                     "metrics": {
@@ -370,11 +320,12 @@ class ModelPipeline:
                         "regression_accuracy": metrics.get("regression_accuracy"),
                         "line_of_best_fit_error": metrics.get("line_of_best_fit_error"),
                         "directional_accuracy": metrics.get("directional_accuracy"),
-                        "percentage_over_prediction": metrics.get("percentage_over_prediction")
+                        "percentage_over_prediction": metrics.get("percentage_over_prediction"),
+                        "pearson_correlation": metrics.get("pearson_correlation"),
+                        "spearman_correlation": metrics.get("spearman_correlation")
                     }
                 }
 
-                # Use the summary_manager to save a JSON summary
                 self.summary_manager.save_individual_model_summary(
                     dest_dir,
                     candidate_model_name,
@@ -384,8 +335,8 @@ class ModelPipeline:
                     best_candidate_summary
                 )
 
-                # Update global "goated" (best) models if this model beats previous bests
-                # R2 (higher is better)
+                # Update global best models for each metric.
+                # (For each metric, update if the new candidate beats the global best.)
                 if metrics["r2"] > self.summary_manager.global_best_r2:
                     self.summary_manager.global_best_r2 = metrics["r2"]
                     self.summary_manager.global_best_info_r2 = {
@@ -398,7 +349,6 @@ class ModelPipeline:
                     }
                     self.summary_manager.update_goated_model_metric("r2", self.summary_manager.global_best_info_r2)
 
-                # line_of_best_fit_error (lower is better)
                 if metrics["line_of_best_fit_error"] < self.summary_manager.global_best_lobf:
                     self.summary_manager.global_best_lobf = metrics["line_of_best_fit_error"]
                     self.summary_manager.global_best_info_lobf = {
@@ -411,7 +361,90 @@ class ModelPipeline:
                     }
                     self.summary_manager.update_goated_model_metric("lobf", self.summary_manager.global_best_info_lobf)
 
-            # Collect results for the final summary
+                if metrics.get("explained_variance") is not None and metrics["explained_variance"] > self.summary_manager.global_best_explained_variance:
+                    self.summary_manager.global_best_explained_variance = metrics["explained_variance"]
+                    self.summary_manager.global_best_info_explained_variance = {
+                        "model_name": candidate_model_name,
+                        "dest_stage": dest_folder_relative,
+                        "gather": gather,
+                        "predict": predict,
+                        "explained_variance": metrics["explained_variance"],
+                        "architecture": best_architecture
+                    }
+                    self.summary_manager.update_goated_model_metric("explained_variance", self.summary_manager.global_best_info_explained_variance)
+
+                if metrics.get("mape") is not None and metrics["mape"] < self.summary_manager.global_best_mape:
+                    self.summary_manager.global_best_mape = metrics["mape"]
+                    self.summary_manager.global_best_info_mape = {
+                        "model_name": candidate_model_name,
+                        "dest_stage": dest_folder_relative,
+                        "gather": gather,
+                        "predict": predict,
+                        "mape": metrics["mape"],
+                        "architecture": best_architecture
+                    }
+                    self.summary_manager.update_goated_model_metric("mape", self.summary_manager.global_best_info_mape)
+
+                if metrics.get("regression_accuracy") is not None and metrics["regression_accuracy"] > self.summary_manager.global_best_regression_accuracy:
+                    self.summary_manager.global_best_regression_accuracy = metrics["regression_accuracy"]
+                    self.summary_manager.global_best_info_regression_accuracy = {
+                        "model_name": candidate_model_name,
+                        "dest_stage": dest_folder_relative,
+                        "gather": gather,
+                        "predict": predict,
+                        "regression_accuracy": metrics["regression_accuracy"],
+                        "architecture": best_architecture
+                    }
+                    self.summary_manager.update_goated_model_metric("regression_accuracy", self.summary_manager.global_best_info_regression_accuracy)
+
+                if metrics.get("directional_accuracy") is not None and metrics["directional_accuracy"] > self.summary_manager.global_best_directional_accuracy:
+                    self.summary_manager.global_best_directional_accuracy = metrics["directional_accuracy"]
+                    self.summary_manager.global_best_info_directional_accuracy = {
+                        "model_name": candidate_model_name,
+                        "dest_stage": dest_folder_relative,
+                        "gather": gather,
+                        "predict": predict,
+                        "directional_accuracy": metrics["directional_accuracy"],
+                        "architecture": best_architecture
+                    }
+                    self.summary_manager.update_goated_model_metric("directional_accuracy", self.summary_manager.global_best_info_directional_accuracy)
+
+                if metrics.get("percentage_over_prediction") is not None and metrics["percentage_over_prediction"] < self.summary_manager.global_best_percentage_over_prediction:
+                    self.summary_manager.global_best_percentage_over_prediction = metrics["percentage_over_prediction"]
+                    self.summary_manager.global_best_info_percentage_over_prediction = {
+                        "model_name": candidate_model_name,
+                        "dest_stage": dest_folder_relative,
+                        "gather": gather,
+                        "predict": predict,
+                        "percentage_over_prediction": metrics["percentage_over_prediction"],
+                        "architecture": best_architecture
+                    }
+                    self.summary_manager.update_goated_model_metric("percentage_over_prediction", self.summary_manager.global_best_info_percentage_over_prediction)
+
+                if metrics.get("pearson_correlation") is not None and metrics["pearson_correlation"] > self.summary_manager.global_best_pearson:
+                    self.summary_manager.global_best_pearson = metrics["pearson_correlation"]
+                    self.summary_manager.global_best_info_pearson = {
+                        "model_name": candidate_model_name,
+                        "dest_stage": dest_folder_relative,
+                        "gather": gather,
+                        "predict": predict,
+                        "pearson_correlation": metrics["pearson_correlation"],
+                        "architecture": best_architecture
+                    }
+                    self.summary_manager.update_goated_model_metric("pearson_correlation", self.summary_manager.global_best_info_pearson)
+
+                if metrics.get("spearman_correlation") is not None and metrics["spearman_correlation"] > self.summary_manager.global_best_spearman:
+                    self.summary_manager.global_best_spearman = metrics["spearman_correlation"]
+                    self.summary_manager.global_best_info_spearman = {
+                        "model_name": candidate_model_name,
+                        "dest_stage": dest_folder_relative,
+                        "gather": gather,
+                        "predict": predict,
+                        "spearman_correlation": metrics["spearman_correlation"],
+                        "architecture": best_architecture
+                    }
+                    self.summary_manager.update_goated_model_metric("spearman_correlation", self.summary_manager.global_best_info_spearman)
+
             results.append({
                 "gather_horizon": gather,
                 "predict_horizon": predict,
@@ -422,10 +455,8 @@ class ModelPipeline:
                 "line_of_best_fit_error": metrics["line_of_best_fit_error"]
             })
 
-            # Restore model stage
             self.model_manager.model_stage = old_stage
 
-            # Periodically clear memory
             if (idx + 1) % 1000 == 0:
                 self.summary_manager.clear_memory()
                 self.logger.info(f"Memory cleared after processing {idx + 1} models.")
@@ -434,13 +465,16 @@ class ModelPipeline:
             self.logger.warning("No horizon combinations produced any results.")
             return results
 
-        # Save final summary table across all combos
         self.summary_manager.save_summary(results)
-
-        # Re-update any global best models in case they've changed (optional re-check).
-        if self.summary_manager.global_best_info_r2:
-            self.summary_manager.update_goated_model_metric("r2", self.summary_manager.global_best_info_r2)
-        if self.summary_manager.global_best_info_lobf:
-            self.summary_manager.update_goated_model_metric("lobf", self.summary_manager.global_best_info_lobf)
-
+        self._recursive_update_goated([
+            ("r2", self.summary_manager.global_best_info_r2),
+            ("lobf", self.summary_manager.global_best_info_lobf),
+            ("explained_variance", self.summary_manager.global_best_info_explained_variance),
+            ("mape", self.summary_manager.global_best_info_mape),
+            ("regression_accuracy", self.summary_manager.global_best_info_regression_accuracy),
+            ("directional_accuracy", self.summary_manager.global_best_info_directional_accuracy),
+            ("percentage_over_prediction", self.summary_manager.global_best_info_percentage_over_prediction),
+            ("pearson_correlation", self.summary_manager.global_best_info_pearson),
+            ("spearman_correlation", self.summary_manager.global_best_info_spearman)
+        ])
         return results
