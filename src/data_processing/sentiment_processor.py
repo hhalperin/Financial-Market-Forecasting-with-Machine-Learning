@@ -1,7 +1,8 @@
 """
 Sentiment Processor Module
 
-Performs sentiment analysis on news texts and computes a rolling expected sentiment based on past reactions.
+Performs sentiment analysis on news texts and computes a rolling expected sentiment
+based on past reactions, optionally weighting by recency.
 """
 
 import pandas as pd
@@ -10,19 +11,23 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from tqdm import tqdm
 from typing import Tuple, List, Any
 from src.utils.logger import get_logger
+import math
 
 class SentimentProcessor:
-    """
-    Analyzes sentiment of news articles using a Hugging Face model and computes a rolling expected sentiment.
-    """
-    def __init__(self, model_name: str = 'ProsusAI/finbert') -> None:
+    def __init__(self, model_name: str = 'ProsusAI/finbert', 
+                 use_recency_weighting: bool = True,
+                 recency_decay: float = 0.01) -> None:
         """
         Initializes the SentimentProcessor.
 
-        :param model_name: Hugging Face model for sequence classification.
+        :param model_name: Hugging Face model name for sentiment analysis.
+        :param use_recency_weighting: If True, weight past sentiments by recency when computing expected sentiment.
+        :param recency_decay: Decay factor to apply based on time difference (in minutes).
         """
         self.logger = get_logger(self.__class__.__name__)
         self.model_name = model_name
+        self.use_recency_weighting = use_recency_weighting
+        self.recency_decay = recency_decay
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -32,10 +37,10 @@ class SentimentProcessor:
 
     def analyze_sentiment(self, texts: List[str], batch_size: int = 16) -> Tuple[List[float], List[float], List[float], List[str]]:
         """
-        Performs sentiment analysis on a list of texts.
+        Analyzes sentiment for a list of texts in batches.
 
-        :param texts: List of news article texts.
-        :param batch_size: Number of texts per batch.
+        :param texts: List of texts to analyze.
+        :param batch_size: Batch size for processing.
         :return: Tuple containing lists of positive, negative, neutral probabilities and predicted labels.
         """
         positive_probs, negative_probs, neutral_probs, predicted_labels = [], [], [], []
@@ -55,11 +60,12 @@ class SentimentProcessor:
 
     def compute_expected_sentiment(self, df: pd.DataFrame, sentiment_col: str = 'summary_sentiment', reaction_col: str = 'minutes_change') -> pd.DataFrame:
         """
-        Computes a rolling expected sentiment based on past sentiments and market reactions.
+        Computes an expected sentiment for each row based on a rolling window of past sentiments and reactions.
+        If recency weighting is enabled, past sentiments are weighted based on the time difference (in minutes).
 
-        :param df: DataFrame containing sentiment and market reaction columns.
-        :param sentiment_col: Column name containing sentiment scores.
-        :param reaction_col: Column name containing market reaction values.
+        :param df: DataFrame containing sentiment and reaction columns along with 'DateTime'.
+        :param sentiment_col: Column name for sentiment value.
+        :param reaction_col: Column name for reaction magnitude (e.g., percentage change).
         :return: DataFrame with an added 'expected_sentiment' column.
         """
         if sentiment_col not in df.columns:
@@ -72,26 +78,45 @@ class SentimentProcessor:
             return df
 
         df.sort_values(by='DateTime', inplace=True)
-        past_sentiments, past_reactions, sentiments = [], [], []
+        past_sentiments, past_reactions, past_datetimes, expected_sentiments = [], [], [], []
+        window_size = 5  # Use the last 5 articles for rolling calculation.
         for idx, row in df.iterrows():
+            current_time = row['DateTime']
             cur_sentiment = self._safe_float(row.get(sentiment_col, 0))
             cur_reaction = abs(self._safe_float(row.get(reaction_col, 1)))
+            current_datetime = pd.to_datetime(current_time)
             past_sentiments.append(cur_sentiment)
             past_reactions.append(cur_reaction)
-            if len(past_sentiments) > 5:
+            past_datetimes.append(current_datetime)
+            if len(past_sentiments) > window_size:
                 past_sentiments.pop(0)
                 past_reactions.pop(0)
-            total_weight = sum(past_reactions)
-            expected_sentiment = (sum(s * w for s, w in zip(past_sentiments, past_reactions)) / total_weight) if total_weight > 0 else 0
-            sentiments.append(expected_sentiment)
-        df['expected_sentiment'] = sentiments
+                past_datetimes.pop(0)
+            if self.use_recency_weighting and past_datetimes:
+                weights = []
+                for past_time, reaction in zip(past_datetimes, past_reactions):
+                    # Compute difference in minutes between current and past times.
+                    delta_minutes = (current_datetime - past_time).total_seconds() / 60.0
+                    weight = reaction * math.exp(-self.recency_decay * delta_minutes)
+                    weights.append(weight)
+                total_weight = sum(weights)
+                expected = (sum(s * w for s, w in zip(past_sentiments, weights)) / total_weight) if total_weight > 0 else 0
+            else:
+                total_weight = sum(past_reactions)
+                expected = (sum(s * w for s, w in zip(past_sentiments, past_reactions)) / total_weight) if total_weight > 0 else 0
+            expected_sentiments.append(expected)
+        df['expected_sentiment'] = expected_sentiments
         df.sort_index(inplace=True)
         return df
 
     @staticmethod
     def _safe_float(value: Any, default: float = 0.0) -> float:
         """
-        Safely converts a value to float, returning a default on error.
+        Safely converts a value to float.
+        
+        :param value: The value to convert.
+        :param default: Default value if conversion fails.
+        :return: Float value.
         """
         try:
             return float(value)

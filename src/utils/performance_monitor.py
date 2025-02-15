@@ -19,8 +19,7 @@ def profile_time(threshold: float = 0.5):
             elapsed = time.monotonic() - start_time
             if elapsed > threshold:
                 logger.warning(
-                    f"Performance Bottleneck: Function '{func.__name__}' took {elapsed:.3f} seconds, "
-                    f"exceeding threshold of {threshold} seconds."
+                    f"Performance Bottleneck: Function '{func.__name__}' took {elapsed:.3f} seconds, exceeding threshold of {threshold} seconds."
                 )
             else:
                 logger.info(f"Function '{func.__name__}' executed in {elapsed:.3f} seconds.")

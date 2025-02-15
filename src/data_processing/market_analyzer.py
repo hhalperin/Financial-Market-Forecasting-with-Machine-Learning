@@ -27,7 +27,7 @@ class MarketAnalyzer:
 
     def calculate_price_fluctuations(self, max_gather_minutes: int, step: int = 5) -> pd.DataFrame:
         """
-        Calculates price changes and percentage changes for various time intervals.
+        Calculates percentage price changes for various time intervals.
 
         :param max_gather_minutes: Maximum horizon in minutes.
         :param step: Step interval in minutes.
@@ -42,9 +42,7 @@ class MarketAnalyzer:
 
         new_columns = {}
         for minutes in tqdm(range(step, max_gather_minutes + 1, step), desc="Calculating Price Fluctuations"):
-            # self.logger.info(f"Calculating price fluctuation for {minutes} minutes.")
             shifted_close = self.data_df['Close'].shift(-minutes)
-            #new_columns[f"{minutes}_minutes_change"] = shifted_close - self.data_df['Close']
             new_columns[f"{minutes}_minutes_percentage_change"] = ((shifted_close - self.data_df['Close']) / self.data_df['Close'] * 100)
 
         fluct_df = pd.DataFrame(new_columns, index=self.data_df.index)
