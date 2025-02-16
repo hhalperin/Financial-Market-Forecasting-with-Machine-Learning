@@ -21,10 +21,10 @@ from src.utils.logger import get_logger
 from typing import Tuple, Any
 from src.config import settings
 
+# We'll use functions from ModelSummary for additional metrics.
+from .model_summary import ModelSummary
+
 class EarlyStopping:
-    """
-    Implements a simple early stopping mechanism.
-    """
     def __init__(self, patience: int = 5, min_delta: float = 0.0) -> None:
         self.patience = patience
         self.min_delta = min_delta
@@ -42,9 +42,6 @@ class EarlyStopping:
                 self.should_stop = True
 
 class ModelManager:
-    """
-    Handles training and evaluation of the stock prediction model.
-    """
     def __init__(
         self,
         input_size: int,
@@ -97,7 +94,6 @@ class ModelManager:
         train_loader = self._get_dataloader(X_train, y_train, batch_size)
         val_loader = self._get_dataloader(X_val, y_val, batch_size)
 
-        # Initialize model with the specified dropout_rate.
         model = StockPredictor(self.input_size, hidden_layers, dropout_rate=dropout_rate).to(self.device)
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=settings.model_weight_decay)
         loss_fn = torch.nn.SmoothL1Loss() if settings.model_loss_function.lower() == "smoothl1" else torch.nn.MSELoss()
@@ -127,8 +123,7 @@ class ModelManager:
         slope, intercept = np.polyfit(y_test, y_test_pred, 1)
         line_of_best_fit_error = abs(slope - 1) + abs(intercept)
 
-        # Compute additional metrics using our ModelSummary helper functions.
-        from .model_summary import ModelSummary  # import here to avoid circular imports if needed
+        # Compute additional metrics using ModelSummary helpers.
         temp_summary = ModelSummary(self.data_handler)
         directional_accuracy = temp_summary.calculate_directional_accuracy(y_test_pred, y_test)
         percentage_over_prediction = temp_summary.calculate_percentage_over_prediction(y_test_pred, y_test)
@@ -228,8 +223,11 @@ class ModelManager:
 
     def _get_dataloader(self, X, y, batch_size: int = None) -> DataLoader:
         batch_size = batch_size or self.batch_size
-        return DataLoader(TensorDataset(torch.tensor(X, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)),
-                          batch_size=batch_size, shuffle=True)
+        return DataLoader(
+            TensorDataset(torch.tensor(X, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)),
+            batch_size=batch_size,
+            shuffle=True
+        )
 
     def save_model(self, model, filepath: str) -> None:
         torch.save(model.state_dict(), filepath)

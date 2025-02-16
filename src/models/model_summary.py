@@ -9,7 +9,7 @@ from typing import Any, List, Dict
 from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import precision_score, recall_score, f1_score
 from src.utils.logger import get_logger
-from .model_analysis import ModelAnalysis
+from .model_analysis import ModelAnalysis  # Assuming this is where your analysis code lives.
 
 class ModelSummary:
     def __init__(self, data_handler):
@@ -107,13 +107,12 @@ class ModelSummary:
         source_dir = os.path.abspath(self._resolve_local_path(best_info["dest_stage"]))
         try:
             for file in os.listdir(source_dir):
-                # Copy both PNG and JSON files
-                if file.lower().endswith((".png", ".json")):
+                if file.lower().endswith(".png"):
                     src_file = os.path.join(source_dir, file)
                     dest_file = os.path.join(dest_dir, file)
                     shutil.copy2(src_file, dest_file)
             self.logger.info(
-                f"Updated goated {metric_name} model: {best_info['model_name']} with {metric_name} value: {best_info[metric_name]}"
+                f"Updated goated {metric_name} model: {best_info['model_name']} with {metric_name} value: {best_info['metrics'].get(metric_name)}"
             )
         except Exception as e:
             self.logger.error(f"Failed to copy files for goated {metric_name} model: {e}")
@@ -122,7 +121,6 @@ class ModelSummary:
         self.logger.info(f"Saved goated {metric_name} info to {details_filename}")
 
     def save_summary(self, results: list) -> None:
-        from .model_analysis import ModelAnalysis
         analysis = ModelAnalysis(self.data_handler, model_stage="models")
         analysis.save_summary_table(results)
         self.logger.info("Training summary table saved.")

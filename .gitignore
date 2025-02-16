@@ -5,8 +5,8 @@
 .venv/
 
 # Ignore data folder
-data/
-
+models/
+src/data/
 # Ignore quant-h2_website folder
 quant-h2_website/
 

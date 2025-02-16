@@ -2,13 +2,14 @@
 Model Analysis Module
 
 This module handles model evaluation and analysis. It computes various metrics (MSE, MAE, R², etc.),
-generates plots (such as learning curves, actual vs. predicted plots, and residuals), and saves
+generates plots (such as learning curves, actual vs. predicted plots, and SHAP feature importance), and saves
 summaries and model details.
 """
 
 import os
 import io
 import json
+
 import pandas as pd
 import numpy as np
 import seaborn as sns
@@ -17,11 +18,15 @@ from src.utils.logger import get_logger
 import torch
 from typing import Any, Optional
 from scipy import stats
+
 import matplotlib
-matplotlib.use('Agg')
+matplotlib.use('Agg')  # Set headless backend
 import matplotlib.pyplot as plt
 
 class ModelAnalysis:
+    """
+    Provides methods for analyzing a trained model.
+    """
     def __init__(self, data_handler: Any, model_stage: str = "models", model_name: str = "model") -> None:
         self.data_handler = data_handler
         self.model_stage = model_stage

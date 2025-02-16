@@ -27,7 +27,7 @@ from typing import Any, Optional, List, Dict
 from src.config import settings
 from sklearn.preprocessing import RobustScaler, StandardScaler, MinMaxScaler
 from src.utils.logger import get_logger
-from .model_summary import ModelSummary
+from .model_summary import ModelSummary  # Updated ModelSummary class
 
 class ModelPipeline:
     def __init__(self, model_manager: Any, data_handler: Any, horizon_manager: Any) -> None:
@@ -53,10 +53,7 @@ class ModelPipeline:
         bool_masks = [(df[col] >= threshold) for col in valid_cols]
         combined_mask = bool_masks[0]
         for m in bool_masks[1:]:
-            if mode == "any":
-                combined_mask = combined_mask | m
-            else:
-                combined_mask = combined_mask & m
+            combined_mask = combined_mask | m if mode == "any" else combined_mask & m
         filtered_df = df[combined_mask].copy()
         self.logger.info(f"Advanced sentiment filter: reduced rows from {orig_len} to {len(filtered_df)} "
                          f"(mode='{mode}', threshold={threshold}, columns={valid_cols}).")
@@ -122,15 +119,52 @@ class ModelPipeline:
         return last_index + 1
 
     def _recursive_update_goated(self, metric_updates: List[tuple]) -> None:
-        """Recursively update goated model metrics.
-           Each tuple is (metric_name, global_best_info).
-        """
         if not metric_updates:
             return
         metric_name, global_info = metric_updates[0]
         if global_info is not None:
             self.summary_manager.update_goated_model_metric(metric_name, global_info)
         self._recursive_update_goated(metric_updates[1:])
+
+    def _update_global_best_metrics(self, candidate_model_name: str, dest_folder_relative: str,
+                                    gather: str, predict: str, best_architecture: Any,
+                                    metrics: dict, best_candidate_summary: dict) -> List[tuple]:
+        metrics_to_check = {
+            "r2": {"better": "higher", "global_attr": "global_best_r2", "info_attr": "global_best_info_r2"},
+            "line_of_best_fit_error": {"better": "lower", "global_attr": "global_best_lobf", "info_attr": "global_best_info_lobf"},
+            "explained_variance": {"better": "higher", "global_attr": "global_best_explained_variance", "info_attr": "global_best_info_explained_variance"},
+            "mape": {"better": "lower", "global_attr": "global_best_mape", "info_attr": "global_best_info_mape"},
+            "regression_accuracy": {"better": "higher", "global_attr": "global_best_regression_accuracy", "info_attr": "global_best_info_regression_accuracy"},
+            "directional_accuracy": {"better": "higher", "global_attr": "global_best_directional_accuracy", "info_attr": "global_best_info_directional_accuracy"},
+            "percentage_over_prediction": {"better": "lower", "global_attr": "global_best_percentage_over_prediction", "info_attr": "global_best_info_percentage_over_prediction"},
+            "pearson_correlation": {"better": "higher", "global_attr": "global_best_pearson", "info_attr": "global_best_info_pearson"},
+            "spearman_correlation": {"better": "higher", "global_attr": "global_best_spearman", "info_attr": "global_best_info_spearman"}
+        }
+        updates = []
+        for metric, config in metrics_to_check.items():
+            candidate_value = metrics.get(metric)
+            if candidate_value is None:
+                continue
+            current_global = getattr(self.summary_manager, config["global_attr"])
+            update = False
+            if config["better"] == "higher" and candidate_value > current_global:
+                update = True
+            elif config["better"] == "lower" and candidate_value < current_global:
+                update = True
+            if update:
+                setattr(self.summary_manager, config["global_attr"], candidate_value)
+                best_info = {
+                    "model_name": candidate_model_name,
+                    "dest_stage": dest_folder_relative,
+                    "gather": gather,
+                    "predict": predict,
+                    "architecture": best_architecture,
+                    "metrics": best_candidate_summary["metrics"]
+                }
+                setattr(self.summary_manager, config["info_attr"], best_info)
+                updates.append((metric, best_info))
+            # Else, do nothing.
+        return updates
 
     def train_on_horizons(
         self,
@@ -161,7 +195,7 @@ class ModelPipeline:
         for idx, combo in enumerate(tqdm(combos, desc="Training across horizons", unit="horizon")):
             gather = combo["gather_name"]
             predict = combo["predict_name"]
-            target_col = f"{predict}_percentage_change"
+            target_col = f"{predict}_percentage_change"  # e.g. "5_minutes_percentage_change"
             if target_col not in df.columns:
                 continue
 
@@ -307,7 +341,7 @@ class ModelPipeline:
                             try:
                                 shutil.copy2(src_file, dest_file)
                             except Exception as e:
-                                self.logger.error(f"Failed to copy plot {file}: {e}")
+                                self.logger.error(f"Failed to copy file {file}: {e}")
 
                 best_candidate_summary = {
                     "architecture": best_architecture,
@@ -335,115 +369,11 @@ class ModelPipeline:
                     best_candidate_summary
                 )
 
-                # Update global best models for each metric.
-                # (For each metric, update if the new candidate beats the global best.)
-                if metrics["r2"] > self.summary_manager.global_best_r2:
-                    self.summary_manager.global_best_r2 = metrics["r2"]
-                    self.summary_manager.global_best_info_r2 = {
-                        "model_name": candidate_model_name,
-                        "dest_stage": dest_folder_relative,
-                        "gather": gather,
-                        "predict": predict,
-                        "r2": metrics["r2"],
-                        "architecture": best_architecture
-                    }
-                    self.summary_manager.update_goated_model_metric("r2", self.summary_manager.global_best_info_r2)
-
-                if metrics["line_of_best_fit_error"] < self.summary_manager.global_best_lobf:
-                    self.summary_manager.global_best_lobf = metrics["line_of_best_fit_error"]
-                    self.summary_manager.global_best_info_lobf = {
-                        "model_name": candidate_model_name,
-                        "dest_stage": dest_folder_relative,
-                        "gather": gather,
-                        "predict": predict,
-                        "lobf": metrics["line_of_best_fit_error"],
-                        "architecture": best_architecture
-                    }
-                    self.summary_manager.update_goated_model_metric("lobf", self.summary_manager.global_best_info_lobf)
-
-                if metrics.get("explained_variance") is not None and metrics["explained_variance"] > self.summary_manager.global_best_explained_variance:
-                    self.summary_manager.global_best_explained_variance = metrics["explained_variance"]
-                    self.summary_manager.global_best_info_explained_variance = {
-                        "model_name": candidate_model_name,
-                        "dest_stage": dest_folder_relative,
-                        "gather": gather,
-                        "predict": predict,
-                        "explained_variance": metrics["explained_variance"],
-                        "architecture": best_architecture
-                    }
-                    self.summary_manager.update_goated_model_metric("explained_variance", self.summary_manager.global_best_info_explained_variance)
-
-                if metrics.get("mape") is not None and metrics["mape"] < self.summary_manager.global_best_mape:
-                    self.summary_manager.global_best_mape = metrics["mape"]
-                    self.summary_manager.global_best_info_mape = {
-                        "model_name": candidate_model_name,
-                        "dest_stage": dest_folder_relative,
-                        "gather": gather,
-                        "predict": predict,
-                        "mape": metrics["mape"],
-                        "architecture": best_architecture
-                    }
-                    self.summary_manager.update_goated_model_metric("mape", self.summary_manager.global_best_info_mape)
-
-                if metrics.get("regression_accuracy") is not None and metrics["regression_accuracy"] > self.summary_manager.global_best_regression_accuracy:
-                    self.summary_manager.global_best_regression_accuracy = metrics["regression_accuracy"]
-                    self.summary_manager.global_best_info_regression_accuracy = {
-                        "model_name": candidate_model_name,
-                        "dest_stage": dest_folder_relative,
-                        "gather": gather,
-                        "predict": predict,
-                        "regression_accuracy": metrics["regression_accuracy"],
-                        "architecture": best_architecture
-                    }
-                    self.summary_manager.update_goated_model_metric("regression_accuracy", self.summary_manager.global_best_info_regression_accuracy)
-
-                if metrics.get("directional_accuracy") is not None and metrics["directional_accuracy"] > self.summary_manager.global_best_directional_accuracy:
-                    self.summary_manager.global_best_directional_accuracy = metrics["directional_accuracy"]
-                    self.summary_manager.global_best_info_directional_accuracy = {
-                        "model_name": candidate_model_name,
-                        "dest_stage": dest_folder_relative,
-                        "gather": gather,
-                        "predict": predict,
-                        "directional_accuracy": metrics["directional_accuracy"],
-                        "architecture": best_architecture
-                    }
-                    self.summary_manager.update_goated_model_metric("directional_accuracy", self.summary_manager.global_best_info_directional_accuracy)
-
-                if metrics.get("percentage_over_prediction") is not None and metrics["percentage_over_prediction"] < self.summary_manager.global_best_percentage_over_prediction:
-                    self.summary_manager.global_best_percentage_over_prediction = metrics["percentage_over_prediction"]
-                    self.summary_manager.global_best_info_percentage_over_prediction = {
-                        "model_name": candidate_model_name,
-                        "dest_stage": dest_folder_relative,
-                        "gather": gather,
-                        "predict": predict,
-                        "percentage_over_prediction": metrics["percentage_over_prediction"],
-                        "architecture": best_architecture
-                    }
-                    self.summary_manager.update_goated_model_metric("percentage_over_prediction", self.summary_manager.global_best_info_percentage_over_prediction)
-
-                if metrics.get("pearson_correlation") is not None and metrics["pearson_correlation"] > self.summary_manager.global_best_pearson:
-                    self.summary_manager.global_best_pearson = metrics["pearson_correlation"]
-                    self.summary_manager.global_best_info_pearson = {
-                        "model_name": candidate_model_name,
-                        "dest_stage": dest_folder_relative,
-                        "gather": gather,
-                        "predict": predict,
-                        "pearson_correlation": metrics["pearson_correlation"],
-                        "architecture": best_architecture
-                    }
-                    self.summary_manager.update_goated_model_metric("pearson_correlation", self.summary_manager.global_best_info_pearson)
-
-                if metrics.get("spearman_correlation") is not None and metrics["spearman_correlation"] > self.summary_manager.global_best_spearman:
-                    self.summary_manager.global_best_spearman = metrics["spearman_correlation"]
-                    self.summary_manager.global_best_info_spearman = {
-                        "model_name": candidate_model_name,
-                        "dest_stage": dest_folder_relative,
-                        "gather": gather,
-                        "predict": predict,
-                        "spearman_correlation": metrics["spearman_correlation"],
-                        "architecture": best_architecture
-                    }
-                    self.summary_manager.update_goated_model_metric("spearman_correlation", self.summary_manager.global_best_info_spearman)
+                # Update global best metrics for all available keys.
+                metric_updates = self._update_global_best_metrics(
+                    candidate_model_name, dest_folder_relative, gather, predict, best_architecture, metrics, best_candidate_summary
+                )
+                self._recursive_update_goated(metric_updates)
 
             results.append({
                 "gather_horizon": gather,
@@ -468,7 +398,7 @@ class ModelPipeline:
         self.summary_manager.save_summary(results)
         self._recursive_update_goated([
             ("r2", self.summary_manager.global_best_info_r2),
-            ("lobf", self.summary_manager.global_best_info_lobf),
+            ("line_of_best_fit_error", self.summary_manager.global_best_info_lobf),
             ("explained_variance", self.summary_manager.global_best_info_explained_variance),
             ("mape", self.summary_manager.global_best_info_mape),
             ("regression_accuracy", self.summary_manager.global_best_info_regression_accuracy),
