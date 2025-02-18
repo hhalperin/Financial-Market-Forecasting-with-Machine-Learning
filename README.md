@@ -1,79 +1,232 @@
-# SEMPER: Stock Embedding Models for Predicting Expected Returns
-
-SEMPER stands for **Stock Embedding Models for Predicting Expected Returns**. This project provides a modular Python codebase designed to aggregate, process, and analyze stock market data and related news articles. The processed data is used to train and run machine learning models that predict expected returns, enabling simulated trading based on these predictions.
-
----
+# Stock Data Aggregation, Processing, and Trading System
 
 ## Overview
 
-The project is organized into several key components:
+This project is a comprehensive system for collecting, processing, modeling, and eventually simulating live trading based on stock market data. The system is designed to:
 
-- **Data Aggregation:**  
-  Retrieves raw intraday stock price data and news articles via APIs (e.g., Alpha Vantage) using a concurrent fetching mechanism. Raw data is cached locally (or in a database) to avoid redundant API calls during development.
+- **Aggregate Data:** Fetch intraday stock price data and related news articles from the Alpha Vantage API.
+- **Process Data:** Clean, merge, and transform the aggregated data—generating market features, sentiment scores, and text embeddings.
+- **Model Training & Evaluation:** Train multiple neural network models to predict stock price fluctuations using various time horizons.
+- **Trading Simulation:** Aggregate real-time data and, using pre-trained models along with configurable trading rules, simulate trades and test strategy performance.
 
-- **Data Processing:**  
-  Cleans and merges raw data, calculates technical indicators (RSI, MACD, ROC, etc.), and performs sentiment analysis using advanced NLP models. Additionally, it generates composite text embeddings using Hugging Face transformer models, combining multiple text fields into a single embedding vector. This processed numeric data is used for model training and prediction.
+## Directory Structure
 
-- **Permanent Storage:**  
-  At each stage, data is saved as CSV (for processed data) or as a NumPy `.npy` file (for numeric features) so that subsequent runs can load saved data quickly, which is especially useful during testing and development.
+project-root/ │ ├── data_aggregation/ │ ├── init.py │ ├── base_data_gatherer.py │ ├── data_aggregator.py │ ├── news_data_gatherer.py │ └── stock_price_data_gatherer.py │ ├── data_processing/ │ ├── init.py │ ├── data_processing.py │ ├── data_embedder.py │ ├── sentiment_processor.py │ ├── market_analyzer.py │ └── time_horizon_manager.py │ ├── models/ │ ├── init.py │ ├── stock_predictor.py │ ├── model_manager.py │ ├── model_analysis.py │ ├── model_pipeline.py │ └── configuration.py │ ├── trading/ │ ├── init.py │ ├── trading_config.py # Trading-specific configuration (extends base settings) │ ├── live_data_collector.py # Continuously polls for live data │ ├── trading_engine.py # Orchestrates live data processing and trading decisions │ ├── trading_rules.py # Contains rule-based trading logic │ ├── trade_simulator.py # Simulates trades based on model predictions │ └── dashboard.py # (Future) Secure live dashboard for monitoring trades │ └── utils/ ├── data_handler.py ├── data_loader.py ├── error_handler.py ├── logger.py └── performance_monitor.py
 
-- **Trading Simulation:**  
-  A trading engine loads a pre-trained model (using “goated” model checkpoints) and uses the processed numeric data to predict expected price fluctuations. Based on simple threshold-based trading rules, the engine simulates trade decisions (BUY, SELL, or HOLD) and logs every decision with its rationale.
+markdown
+Copy
 
-- **Performance Monitoring:**  
-  Critical functions throughout the pipeline are decorated with a performance monitor (`@profile_time`) that logs execution times and warns when a function exceeds a specified threshold.
+## Configuration
 
-- **Continuous Integration:**  
-  The project will be set up with GitHub Actions for automated linting and testing on every push, ensuring code quality and consistency.
+The system uses a centralized configuration file (`src/config.py`) based on Pydantic’s `BaseSettings` to load parameters from environment variables (via a `.env` file). For trading-specific settings, a new file—`trading/trading_config.py`—extends these settings to include parameters such as:
 
----
+- **Initial Capital:** Starting balance for backtesting.
+- **Commission & Slippage:** Costs per trade.
+- **Live Mode Toggles:** Enable or disable live data collection.
+- **Live Data Days:** Number of days of live data to use.
+- **Storage Paths:** Trading-specific paths to avoid conflicts with other modules.
+- **Visualization Parameters:** Titles for equity curve, drawdowns, and trade histograms.
 
-## Features
+Make sure to create a `.env` file in the project root with the necessary API keys and any custom settings.
 
-- **Modular Architecture:**  
-  The codebase is divided into distinct modules for data aggregation, processing, model training, and trading simulation.
-
-- **Configurable Settings:**  
-  All configurable parameters (API keys, storage modes, model hyperparameters, trading thresholds, etc.) are centralized in `config.py` and `trading_config.py`.
-
-- **Composite Text Embeddings:**  
-  News text from multiple fields (e.g., title, authors, summary) is combined into a single composite embedding, reducing dimensionality and simplifying model input.
-
-- **Advanced Sentiment Analysis:**  
-  Uses state-of-the-art NLP models (e.g., FinBERT) with recency weighting to compute sentiment scores from news articles.
-
-- **Technical Indicators:**  
-  Computes market technical indicators such as RSI, MACD, and ROC using TA-Lib.
-
-- **Time Horizon Management:**  
-  Generates multiple time horizon combinations to support robust model training and analysis.
-
-- **Robust Data Caching:**  
-  Saves data at each processing stage to CSV or `.npy` formats, allowing for rapid reloading during development and testing.
-
-- **Simple Trading Rules:**  
-  Implements threshold-based trading rules to decide trade actions (BUY, SELL, or HOLD) based on predicted expected returns.
-
-- **Extensive Logging:**  
-  Detailed logging is built in at every stage—from data aggregation to prediction—making debugging and performance analysis easier.
-
-- **Performance Monitoring:**  
-  Key functions are instrumented with a timing decorator that logs execution times, helping identify bottlenecks.
-
----
-
-## Getting Started
-
-### Prerequisites
-
-- Python 3.8 or higher
-- [TA-Lib](https://mrjbq7.github.io/ta-lib/) for technical indicator calculations
-- A virtual environment is recommended
-
-### Installation
+## Installation
 
 1. **Clone the Repository:**
-
    ```bash
-   git clone https://github.com/yourusername/your-repo-name.git
-   cd your-repo-name
+   git clone https://github.com/yourusername/your-repo.git
+   cd your-repo
+Create a Virtual Environment:
+
+bash
+Copy
+python -m venv venv
+source venv/bin/activate   # On Windows use: venv\Scripts\activate
+Install Dependencies:
+
+bash
+Copy
+pip install -r requirements.txt
+(Ensure your requirements.txt includes packages such as pydantic_settings, requests, boto3, tenacity, pandas, numpy, talib, torch, transformers, scikit-learn, etc.)
+
+Running the System
+1. Data Aggregation
+To fetch historical price and news data:
+
+bash
+Copy
+python src/main.py
+This script loads configuration, aggregates data using modules in data_aggregation/, and stores the results locally or in a database.
+
+2. Data Processing
+To clean, merge, and enrich the aggregated data:
+
+bash
+Copy
+python src/data_processing/main.py
+This step produces preprocessed and numeric data for model training.
+
+3. Model Training & Evaluation
+To train your stock prediction models across various time horizons:
+
+bash
+Copy
+python src/models/main.py
+This module trains multiple models, evaluates them, and optionally performs hyperparameter optimization using Optuna.
+
+4. Trading Simulation (Live Trading)
+Live Data Collector
+The new live_data_collector.py module (located in trading/) wraps the data aggregation code in a continuous loop. It is designed to:
+
+Before Market Open: Poll and fetch all after-hours data at market open.
+During Market Hours: Poll live data every minute (trading occurs only during market hours).
+Starting the Trading Engine
+Once the live data collector is running, the trading engine (in trading/trading_engine.py) processes the new data, applies your trading rules (defined in trading/trading_rules.py), and simulates trade executions via the trade simulator (trading/trade_simulator.py).
+
+To start the live trading simulation, set the live_mode boolean to True in your trading/trading_config.py and run:
+
+bash
+Copy
+python src/trading/live_data_collector.py
+(Depending on your final integration, the trading engine might be invoked from within the live data collector or as a separate process.)
+
+5. Dashboard (Future)
+A secure, password-protected dashboard (using Flask, Django, or Streamlit) is planned to provide a live view of:
+
+Stock price charts.
+Expected price fluctuation graphs.
+Trade logs and performance metrics.
+Future Enhancements
+Data Storage: Migrate from local CSV/SQLite to cloud-based databases as data volume increases.
+Advanced Trading Rules: Start with simple threshold-based rules and evolve toward more complex, adaptive strategies (e.g., dynamic stop-loss or neural network-based parameter prediction).
+Dashboard Integration: Build a secure web dashboard for real-time monitoring and control.
+Automated Model Updates: Implement automated retraining using the most recent data during live trading.
+Enhanced Error Handling & Alerts: Improve error handling and logging, and add real-time alerts for critical system failures.
+Contributing
+Contributions are welcome! Please feel free to submit issues or pull requests to help improve the project.
+
+License
+This project is licensed under the MIT License.
+
+For any questions or further clarifications, please open an issue in the repository or contact the maintainers.
+
+Copy
+
+
+
+
+
+You said:
+This output is not entirely in a markdown file, maybe use canvas?
+Reasoned for 7 seconds
+Below is the entire README.md file wrapped inside a Markdown code block (using triple backticks with the markdown language hint). You can copy this and paste it directly into your README.md file.
+
+markdown
+Copy
+# Stock Data Aggregation, Processing, and Trading System
+
+## Overview
+
+This project is a comprehensive system for collecting, processing, modeling, and eventually simulating live trading based on stock market data. The system is designed to:
+
+- **Aggregate Data:** Fetch intraday stock price data and related news articles from the Alpha Vantage API.
+- **Process Data:** Clean, merge, and transform the aggregated data—generating market features, sentiment scores, and text embeddings.
+- **Model Training & Evaluation:** Train multiple neural network models to predict stock price fluctuations using various time horizons.
+- **Trading Simulation:** Aggregate real-time data and, using pre-trained models along with configurable trading rules, simulate trades and test strategy performance.
+
+## Directory Structure
+
+project-root/ │ ├── data_aggregation/ │ ├── init.py │ ├── base_data_gatherer.py │ ├── data_aggregator.py │ ├── news_data_gatherer.py │ └── stock_price_data_gatherer.py │ ├── data_processing/ │ ├── init.py │ ├── data_processing.py │ ├── data_embedder.py │ ├── sentiment_processor.py │ ├── market_analyzer.py │ └── time_horizon_manager.py │ ├── models/ │ ├── init.py │ ├── stock_predictor.py │ ├── model_manager.py │ ├── model_analysis.py │ ├── model_pipeline.py │ └── configuration.py │ ├── trading/ │ ├── init.py │ ├── trading_config.py # Trading-specific configuration (extends base settings) │ ├── live_data_collector.py # Continuously polls for live data │ ├── trading_engine.py # Orchestrates live data processing and trading decisions │ ├── trading_rules.py # Contains rule-based trading logic │ ├── trade_simulator.py # Simulates trades based on model predictions │ └── dashboard.py # (Future) Secure live dashboard for monitoring trades │ └── utils/ ├── data_handler.py ├── data_loader.py ├── error_handler.py ├── logger.py └── performance_monitor.py
+
+markdown
+Copy
+
+## Configuration
+
+The system uses a centralized configuration file (`src/config.py`) based on Pydantic’s `BaseSettings` to load parameters from environment variables (via a `.env` file). For trading-specific settings, a new file—`trading/trading_config.py`—extends these settings to include parameters such as:
+
+- **Initial Capital:** Starting balance for backtesting.
+- **Commission & Slippage:** Costs per trade.
+- **Live Mode Toggles:** Enable or disable live data collection.
+- **Live Data Days:** Number of days of live data to use.
+- **Storage Paths:** Trading-specific paths to avoid conflicts with other modules.
+- **Visualization Parameters:** Titles for equity curve, drawdowns, and trade histograms.
+
+Make sure to create a `.env` file in the project root with the necessary API keys and any custom settings.
+
+## Installation
+
+1. **Clone the Repository:**
+   ```bash
+   git clone https://github.com/yourusername/your-repo.git
+   cd your-repo
+Create a Virtual Environment:
+
+bash
+Copy
+python -m venv venv
+source venv/bin/activate   # On Windows use: venv\Scripts\activate
+Install Dependencies:
+
+bash
+Copy
+pip install -r requirements.txt
+(Ensure your requirements.txt includes packages such as pydantic_settings, requests, boto3, tenacity, pandas, numpy, talib, torch, transformers, scikit-learn, etc.)
+
+Running the System
+1. Data Aggregation
+To fetch historical price and news data:
+
+bash
+Copy
+python src/main.py
+This script loads configuration, aggregates data using modules in data_aggregation/, and stores the results locally or in a database.
+
+2. Data Processing
+To clean, merge, and enrich the aggregated data:
+
+bash
+Copy
+python src/data_processing/main.py
+This step produces preprocessed and numeric data for model training.
+
+3. Model Training & Evaluation
+To train your stock prediction models across various time horizons:
+
+bash
+Copy
+python src/models/main.py
+This module trains multiple models, evaluates them, and optionally performs hyperparameter optimization using Optuna.
+
+4. Trading Simulation (Live Trading)
+Live Data Collector
+The new live_data_collector.py module (located in trading/) wraps the data aggregation code in a continuous loop. It is designed to:
+
+Before Market Open: Poll and fetch all after-hours data at market open.
+During Market Hours: Poll live data every minute (trading occurs only during market hours).
+Starting the Trading Engine
+Once the live data collector is running, the trading engine (in trading/trading_engine.py) processes the new data, applies your trading rules (defined in trading/trading_rules.py), and simulates trade executions via the trade simulator (trading/trade_simulator.py).
+
+To start the live trading simulation, set the live_mode boolean to True in your trading/trading_config.py and run:
+
+bash
+Copy
+python src/trading/live_data_collector.py
+(Depending on your final integration, the trading engine might be invoked from within the live data collector or as a separate process.)
+
+5. Dashboard (Future)
+A secure, password-protected dashboard (using Flask, Django, or Streamlit) is planned to provide a live view of:
+
+Stock price charts.
+Expected price fluctuation graphs.
+Trade logs and performance metrics.
+Future Enhancements
+Data Storage: Migrate from local CSV/SQLite to cloud-based databases as data volume increases.
+Advanced Trading Rules: Start with simple threshold-based rules and evolve toward more complex, adaptive strategies (e.g., dynamic stop-loss or neural network-based parameter prediction).
+Dashboard Integration: Build a secure web dashboard for real-time monitoring and control.
+Automated Model Updates: Implement automated retraining using the most recent data during live trading.
+Enhanced Error Handling & Alerts: Improve error handling and logging, and add real-time alerts for critical system failures.
+Contributing
+Contributions are welcome! Please feel free to submit issues or pull requests to help improve the project.
+
+License
+This project is licensed under the MIT License.
