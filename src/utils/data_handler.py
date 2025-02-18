@@ -144,7 +144,7 @@ class DataHandler:
             local_path = os.path.join(stage_dir, filename)
             with open(local_path, "wb") as f:
                 f.write(figure_bytes)
-            logger.info(f"Figure saved locally: {local_path}")
+            # logger.info(f"Figure saved locally: {local_path}")
 
     def save_model(self, model: torch.nn.Module, filepath: str) -> None:
         if self.storage_mode == "s3":
