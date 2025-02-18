@@ -13,7 +13,6 @@ logger = get_logger('DataHandler')
 
 class DataHandler:
     def __init__(self, bucket: Union[str, None] = None, base_data_dir: Union[str, None] = None, storage_mode: str = 'local') -> None:
-        # Use the global settings for the base data directory if not provided.
         if base_data_dir is None:
             base_data_dir = settings.data_storage_path
         self.bucket = bucket
@@ -27,15 +26,24 @@ class DataHandler:
         logger.info(f"Initialized DataHandler with base_data_dir={self.base_data_dir}")
 
     def construct_filename(self, ticker: str, stage: str, date_range: str, file_type: str) -> str:
-        """
-        Constructs a deterministic filename.
-        """
         return f"{ticker}_{stage}_{date_range}.{file_type}"
 
     def __call__(self, ticker: str, date_range: str, data_type: str, data_fetcher, stage: str = 'raw') -> Any:
+        """
+        This is the main 'fetch or load' logic. If you want to fetch data by calling:
+            data_handler(ticker, date_range, data_type, fetcher, stage='...')
+        you can do so directly.
+        """
         file_type = 'npy' if data_type == 'embeddings' else 'csv'
         filename = self.construct_filename(ticker, stage, date_range, file_type)
         return self._load_or_fetch(filename, data_type, data_fetcher, stage)
+
+    def get_data(self, ticker: str, date_range: str, data_type: str, data_fetcher, stage: str = 'raw') -> Any:
+        """
+        If you want a named method instead of using the __call__, define it here
+        and just delegate to __call__.
+        """
+        return self.__call__(ticker, date_range, data_type, data_fetcher, stage)
 
     def _load_or_fetch(self, filename: str, data_type: str, data_fetcher, stage: str) -> Any:
         cache_key = f"{stage}/{filename}"
@@ -53,18 +61,12 @@ class DataHandler:
         return data
 
     def save_data(self, data: Union[pd.DataFrame, np.ndarray], filename: str, data_type: str, stage: str) -> None:
-        """
-        Saves data locally or to S3.
-        """
         if self.storage_mode == 's3':
             self._save_s3(data, filename, data_type, stage)
         else:
             self._save_local(data, filename, data_type, stage)
 
     def load_data(self, filename: str, data_type: str, stage: str) -> Any:
-        """
-        Loads data locally or from S3.
-        """
         if self.storage_mode == 's3':
             return self._load_s3(filename, data_type, stage)
         else:
@@ -116,10 +118,18 @@ class DataHandler:
         if not os.path.exists(local_path):
             logger.info(f"No existing local file: {local_path}")
             return None
+        # Check if file is empty
+        if os.path.getsize(local_path) == 0:
+            logger.warning(f"Local file exists but is empty: {local_path}")
+            return pd.DataFrame()
         if data_type == 'embeddings':
             return np.load(local_path, allow_pickle=True)
         else:
-            return pd.read_csv(local_path)
+            try:
+                return pd.read_csv(local_path)
+            except pd.errors.EmptyDataError:
+                logger.warning(f"EmptyDataError reading file {local_path}")
+                return pd.DataFrame()
 
     def _prepare_local_path(self, filename: str, stage: str, create: bool = True) -> str:
         stage_dir = os.path.join(self.base_data_dir, stage)
@@ -144,7 +154,6 @@ class DataHandler:
             local_path = os.path.join(stage_dir, filename)
             with open(local_path, "wb") as f:
                 f.write(figure_bytes)
-            # logger.info(f"Figure saved locally: {local_path}")
 
     def save_model(self, model: torch.nn.Module, filepath: str) -> None:
         if self.storage_mode == "s3":

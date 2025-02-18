@@ -75,17 +75,34 @@ class StockPriceDataGatherer(BaseDataGatherer):
                 f"&outputsize=full"
                 f"&apikey={self.api_key}"
             )
-            # self.logger.debug(f"Fetching stock data with URL: {url}")
-            data = self.make_api_request(url)
-            key = f"Time Series ({self.interval})"
-            ts_data = data.get(key, {})
-
-            if not ts_data:
-                self.logger.warning(f"No intraday data returned for {date_frag}")
+            
+            self.logger.info(f"[DEBUG] Fetching stock data with URL: {url}")
+            
+            try:
+                data = self.make_api_request(url)
+            except Exception as e:
+                self.logger.error(f"[ERROR] API request failed for {self.ticker} - {e}")
                 continue
 
+            # Log the full response to check for API errors
+            self.logger.info(f"[DEBUG] API Response for {self.ticker} on {date_frag}: {data}")
+
+            # Check for Alpha Vantage errors or empty data
+            if isinstance(data, dict):
+                if "Note" in data:
+                    self.logger.error(f"[ERROR] API Limit reached: {data['Note']}")
+                    return pd.DataFrame()
+                if "Error Message" in data:
+                    self.logger.error(f"[ERROR] API Error: {data['Error Message']}")
+                    return pd.DataFrame()
+                if "Time Series ({})".format(self.interval) not in data:
+                    self.logger.warning(f"[WARNING] No data found for {self.ticker} on {date_frag}: {data}")
+                    continue
+
+            ts_data = data[f"Time Series ({self.interval})"]
             df = pd.DataFrame.from_dict(ts_data, orient='index')
-            # Rename columns for clarity.
+
+            # Rename columns
             df.rename(columns={
                 '1. open': 'Open',
                 '2. high': 'High',
@@ -93,22 +110,25 @@ class StockPriceDataGatherer(BaseDataGatherer):
                 '4. close': 'Close',
                 '5. volume': 'Volume'
             }, inplace=True)
+
             df['Symbol'] = self.ticker
             df.reset_index(inplace=True)
             df.rename(columns={'index': 'DateTime'}, inplace=True)
             df_list.append(df)
 
         if not df_list:
+            self.logger.error(f"[ERROR] No valid data retrieved for {self.ticker}. Alpha Vantage API might be blocking requests.")
             return pd.DataFrame()
 
         pricing_df = pd.concat(df_list, ignore_index=True)
-        # Ensure the DataFrame has the correct column order.
         pricing_df = pricing_df[['Symbol', 'DateTime', 'Open', 'High', 'Low', 'Close', 'Volume']]
         pricing_df['DateTime'] = pd.to_datetime(pricing_df['DateTime'], errors='coerce')
         pricing_df.sort_values('DateTime', inplace=True)
         pricing_df.drop_duplicates(subset=['DateTime'], inplace=True)
         pricing_df.reset_index(drop=True, inplace=True)
+
         return pricing_df
+
 
     def run(self) -> pd.DataFrame:
         """
