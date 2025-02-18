@@ -1,0 +1,2 @@
+timestamp,decision,prediction,rationale,capital_before,profit,capital_after
+2025-02-18T10:34:31.740944Z,HOLD,0.0,Predicted fluctuation of 0.00% does not trigger any trade action.,100000.0,0.0,100000.0

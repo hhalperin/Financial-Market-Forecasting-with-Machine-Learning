@@ -86,12 +86,12 @@ class Settings(BaseSettings):
     # -------------------------------
     # Hyperparameter Optimization Configuration
     # -------------------------------
-    hyperparameter_trials: int = 20000
+    hyperparameter_trials: int = 2000
 
     # -------------------------------
     # Pipeline Configuration
     # -------------------------------
-    num_combos: int = 20000
+    num_combos: int = 2000
 
     # -------------------------------
     # Candidate Architectures for Model Search

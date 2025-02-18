@@ -95,6 +95,10 @@ class ModelSummary:
         self.logger.info(f"Saved model summary JSON at {os.path.join(dest_dir, summary_filename)}")
 
     def update_goated_model_metric(self, metric_name: str, best_info: dict) -> None:
+        """
+        If a new global best is found, copy the best model files into a 'goated_models/goated_{metric_name}' folder.
+        This version now copies both plot files (.png) and the model weight file (.pt) from the best_models folder.
+        """
         dest_relative = os.path.join("models", "goated_models", f"goated_{metric_name}")
         dest_dir = os.path.abspath(os.path.join(self.data_handler.base_data_dir, dest_relative))
         if os.path.exists(dest_dir):
@@ -104,10 +108,11 @@ class ModelSummary:
             except Exception as e:
                 self.logger.error(f"Failed to clear goated {metric_name} folder: {e}")
         os.makedirs(dest_dir, exist_ok=True)
+
         source_dir = os.path.abspath(self._resolve_local_path(best_info["dest_stage"]))
         try:
             for file in os.listdir(source_dir):
-                if file.lower().endswith(".png"):
+                if file.lower().endswith(".png") or file.lower().endswith(".pt"):
                     src_file = os.path.join(source_dir, file)
                     dest_file = os.path.join(dest_dir, file)
                     shutil.copy2(src_file, dest_file)
@@ -116,6 +121,7 @@ class ModelSummary:
             )
         except Exception as e:
             self.logger.error(f"Failed to copy files for goated {metric_name} model: {e}")
+
         details_filename = f"goated_{metric_name}_info.json"
         self.data_handler.save_json(best_info, details_filename, stage=dest_relative)
         self.logger.info(f"Saved goated {metric_name} info to {details_filename}")
