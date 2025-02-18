@@ -7,6 +7,8 @@
 # Ignore data folder
 models/
 src/data/
+permanent_storage/
+
 # Ignore quant-h2_website folder
 quant-h2_website/
 
