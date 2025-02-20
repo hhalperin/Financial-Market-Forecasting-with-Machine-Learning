@@ -6,7 +6,7 @@ It performs the following steps:
   - Clean and sort price data.
   - Preprocess news data.
   - Analyze market features (price fluctuations and technical indicators).
-  - Merge price and news data using as-of joins.
+  - Merge price and news data using as-of joins (merging solely on datetime and retaining only one symbol).
   - Drop incomplete news records.
   - Perform sentiment analysis on news texts.
   - Generate embeddings for text fields (with optional composite embedding).
@@ -56,7 +56,7 @@ class DataProcessor:
             use_recency_weighting=settings.sentiment_use_recency_weighting,
             recency_decay=settings.sentiment_recency_decay
         )
-        # Initialize DataEmbedder with new composite embedding parameters from config.
+        # Initialize DataEmbedder with composite embedding parameters from config.
         self.embedder = DataEmbedder(
             model_name=embedding_model,
             n_components=settings.embedding_n_components,
@@ -109,6 +109,7 @@ class DataProcessor:
         """
         Performs an as-of merge between price and news data.
         Aligns news items with the nearest price record within the specified tolerance.
+        Merges solely based on the datetime columns and ensures only one symbol column is present.
 
         :param tolerance: Maximum allowed time difference (e.g., '5min').
         :param direction: Merge direction ('backward', 'forward', or 'nearest').
@@ -134,6 +135,16 @@ class DataProcessor:
             direction=direction,
             tolerance=pd.Timedelta(tolerance)
         )
+
+        # Remove duplicate symbol columns if present, keeping only one.
+        if 'Symbol_x' in merged.columns and 'Symbol_y' in merged.columns:
+            merged.drop(columns=['Symbol_y'], inplace=True)
+            merged.rename(columns={'Symbol_x': 'Symbol'}, inplace=True)
+        elif 'Symbol' in price.columns and 'Symbol' in news.columns:
+            # In case both dataframes have a 'Symbol' column without suffixes,
+            # ensure only one appears in the merged DataFrame.
+            merged = merged.loc[:, ~merged.columns.duplicated()]
+
         self.df = merged
         self.logger.info(f"ASOF-merged data shape: {self.df.shape}")
 

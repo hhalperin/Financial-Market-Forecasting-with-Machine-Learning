@@ -18,7 +18,7 @@ from src.config import settings
 from src.utils.logger import get_logger
 from src.data_processing.data_processing import DataProcessor
 from src.data_processing.time_horizon_manager import TimeHorizonManager
-from src.utils.data_handler import DataHandler  # Pre-instantiated DataHandler from __init__.py
+from src.utils.data_handler import DataHandler  # Import the DataHandler class
 
 logger = get_logger("DataProcessingMain")
 
@@ -31,8 +31,12 @@ def main() -> None:
     logger.info(f"Configuration: ticker={settings.ticker}, start_date={settings.start_date}, "
                 f"end_date={settings.end_date}, storage_mode={settings.storage_mode}")
 
-    # Use the pre-configured DataHandler instance.
-    data_handler = DataHandler
+    # Instantiate DataHandler (instead of using the class directly).
+    data_handler = DataHandler(
+        bucket=settings.s3_bucket,
+        base_data_dir=settings.data_storage_path,
+        storage_mode=settings.storage_mode
+    )
 
     # Construct a date range string and log it.
     ticker = settings.ticker
@@ -44,8 +48,8 @@ def main() -> None:
         return pd.DataFrame()
 
     # Retrieve price and news data using DataHandler's get_data method.
-    price_df = data_handler.get_data(ticker, date_range, "price", no_op_fetch, stage="price")
-    news_df = data_handler.get_data(ticker, date_range, "news", no_op_fetch, stage="news")
+    price_df = data_handler(ticker, date_range, "price", no_op_fetch, stage="price")
+    news_df = data_handler(ticker, date_range, "news", no_op_fetch, stage="news")
 
     # Log DataFrame information directly.
     logger.info(f"Loaded price_df: shape={price_df.shape}, columns={list(price_df.columns)}")
@@ -75,19 +79,19 @@ def main() -> None:
         for m in range(5, max_gather_minutes + 1, 5)
     ]
     processed_df = processor.process_pipeline(time_horizons)
-    logger.info(f"Final processed DataFrame (raw): shape={processed_df.shape}, columns={list(processed_df.columns)}")
-    logger.info(f"Numeric DataFrame for training: shape={processor.numeric_df.shape}, columns={list(processor.numeric_df.columns)}")
+    #logger.info(f"Final processed DataFrame (raw): shape={processed_df.shape}, columns={list(processed_df.columns)}")
+    #logger.info(f"Numeric DataFrame for training: shape={processor.numeric_df.shape}, columns={list(processor.numeric_df.columns)}")
 
     # Save numeric and preprocessed data.
-    data_handler.get_data(ticker, date_range, "numeric", lambda: processor.numeric_df, stage="numeric")
-    logger.info("Saved numeric data for training.")
+    data_handler(ticker, date_range, "numeric", lambda: processor.numeric_df, stage="numeric")
+    #logger.info("Saved numeric data for training.")
 
     numeric_filename = data_handler.construct_filename(ticker, "numeric", date_range, "npy")
     data_handler.save_data(processor.numeric_df.values, numeric_filename, data_type="embeddings", stage="numeric")
-    logger.info(f"Numeric embeddings saved to numeric/{numeric_filename}.")
+    #logger.info(f"Numeric embeddings saved to numeric/{numeric_filename}.")
 
-    data_handler.get_data(ticker, date_range, "preprocessed", lambda: processed_df, stage="preprocessed")
-    logger.info("Saved final preprocessed data.")
+    data_handler(ticker, date_range, "preprocessed", lambda: processed_df, stage="preprocessed")
+    #logger.info("Saved final preprocessed data.")
 
 
 if __name__ == "__main__":

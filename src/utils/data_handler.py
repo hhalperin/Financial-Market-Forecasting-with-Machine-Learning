@@ -119,7 +119,13 @@ class DataHandler:
         if data_type == 'embeddings':
             return np.load(local_path, allow_pickle=True)
         else:
-            return pd.read_csv(local_path)
+            try:
+                # Specify low_memory=False to avoid DtypeWarning
+                return pd.read_csv(local_path, low_memory=False)
+            except pd.errors.EmptyDataError:
+                logger.warning(f"EmptyDataError reading file {local_path}")
+                return pd.DataFrame()
+
 
     def _prepare_local_path(self, filename: str, stage: str, create: bool = True) -> str:
         stage_dir = os.path.join(self.base_data_dir, stage)

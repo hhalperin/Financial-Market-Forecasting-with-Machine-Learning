@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     # -------------------------------
     # Data and API Parameters
     # -------------------------------
-    ticker: str = "NVDA"
+    ticker: str = "HIMS"
     start_date: str = "2022-01-01"
     end_date: str = "2025-01-01"
     interval: str = "1min"
