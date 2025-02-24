@@ -1,4 +1,4 @@
-# Stock Data Aggregation, Processing, and Trading System
+# Financial Market Forecasting using Machine Learning
 
 ## Overview
 
