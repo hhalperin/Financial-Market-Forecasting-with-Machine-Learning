@@ -1,41 +1,25 @@
-# trading_rules.py
-"""
-Trading Rules Module
+# src/trading/trading_rules.py
 
-This module defines functions to apply trading rules and risk management to generate
-trade orders from signals. Adjust the logic to suit your risk management strategy.
-"""
+from src.utils.logger import get_logger
 
-import logging
-
-def apply_trading_rules(signal, config):
+class TradingRules:
     """
-    Applies trading rules to a given signal and returns an order dictionary.
-    
-    :param signal: The trading signal (e.g., "buy", "sell", "hold").
-    :param config: The trading configuration containing thresholds and trade parameters.
-    :return: A dictionary representing the trade order.
+    Contains trading rules logic to decide whether to BUY, SELL, or HOLD based on model predictions.
     """
-    logger = logging.getLogger("TradingRules")
-    logger.info("Applying trading rules.")
+    def __init__(self):
+        self.logger = get_logger(self.__class__.__name__)
+        self.buy_threshold = 1.0    # percent threshold to trigger BUY
+        self.sell_threshold = -1.0  # percent threshold to trigger SELL
 
-    order = {}
-    if signal == "buy":
-        order = {
-            "action": "buy",
-            "trade_size": config.trade_size,
-            "stop_loss": config.stop_loss,       # Default value; may be updated later.
-            "take_profit": config.take_profit    # Default value; may be updated later.
-        }
-    elif signal == "sell":
-        order = {
-            "action": "sell",
-            "trade_size": config.trade_size,
-            "stop_loss": config.stop_loss,
-            "take_profit": config.take_profit
-        }
-    else:
-        order = {"action": "hold"}
-
-    logger.info(f"Order generated: {order}")
-    return order
+    def evaluate_trade(self, predicted_fluctuation: float):
+        if predicted_fluctuation >= self.buy_threshold:
+            decision = "BUY"
+            rationale = f"Predicted increase of {predicted_fluctuation:.2f}% exceeds buy threshold of {self.buy_threshold}%."
+        elif predicted_fluctuation <= self.sell_threshold:
+            decision = "SELL"
+            rationale = f"Predicted decrease of {predicted_fluctuation:.2f}% exceeds sell threshold of {self.sell_threshold}%."
+        else:
+            decision = "HOLD"
+            rationale = f"Predicted fluctuation of {predicted_fluctuation:.2f}% does not trigger any trade action."
+        self.logger.info(f"Evaluated trade decision: {decision} | {rationale}")
+        return decision, rationale

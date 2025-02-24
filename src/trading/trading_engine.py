@@ -1,165 +1,123 @@
-# trading_engine.py
-"""
-Trading Engine Module
+# src/trading/trading_engine.py
 
-This module defines the TradingEngine class which orchestrates the trading workflow:
-1. Data gathering via existing pipelines.
-2. Aggregated model prediction from multiple models.
-3. Generation of trading signals.
-4. Application of trading rules.
-5. Execution of trades (simulation or live using Interactive Brokers).
-6. Analysis and visualization of trading performance.
-"""
+import os
+import json
+import torch
+import numpy as np
+import pandas as pd
+from src.utils.logger import get_logger
+from src.trading.trading_config import trading_settings
+from src.trading.trading_rules import TradingRules
+from src.trading.trade_simulator import TradeSimulator
+from src.models.stock_predictor import StockPredictor
 
-import logging
-from .trading_config import trading_config
-from .trading_signals import generate_signal
-from .trading_rules import apply_trading_rules
-from .trading_analysis import analyze_trades
-from .trading_visualization import visualize_trades
-
-# Import existing pipelines (adjust these imports as necessary for your project structure)
-from src.data_aggregation import main as da_main
-from src.data_processing import main as dp_main
+def prepare_features(numeric_data):
+    """
+    Converts numeric_data (loaded from .npy) into a 2D float32 array.
+    It creates a DataFrame, selects only numeric columns, and returns a proper float32 NumPy array.
+    """
+    df = pd.DataFrame(numeric_data)
+    # Select only numeric columns
+    df_numeric = df.select_dtypes(include=[np.number])
+    if df_numeric.empty:
+        get_logger("prepare_features").error("No numeric columns found in processed data.")
+        return np.empty((df.shape[0], 0))
+    return df_numeric.to_numpy(dtype=np.float32)
 
 class TradingEngine:
-    def __init__(self):
-        self.config = trading_config
-        self.logger = logging.getLogger("TradingEngine")
-        self.logger.setLevel(logging.INFO)
-
-    def run(self):
+    def __init__(self, ticker: str, local_mode: bool = True):
+        self.ticker = ticker
+        self.local_mode = local_mode
+        self.logger = get_logger(self.__class__.__name__)
+        self.model = None
+        self.trading_rules = TradingRules()
+        self.trade_simulator = TradeSimulator()
+        self.load_model()
+    
+    def load_model(self):
         """
-        Runs the complete trading session.
+        Loads the pre-trained model based on goated model info.
+        Fixes the checkpoint path if the goated info already includes the prefix.
         """
         try:
-            self.logger.info("Starting trading session.")
-
-            # Step 1: Gather data via aggregation and processing pipelines.
-            self.gather_data()
-
-            # Step 2: Load processed data (replace with your actual data loading logic).
-            processed_data = self.load_processed_data()
-
-            # Step 3: Generate aggregated prediction from multiple models.
-            model_output = self.predict(processed_data)
-
-            # Step 4: Generate trading signal based on aggregated model output.
-            signal = generate_signal(model_output, self.config)
-            self.logger.info(f"Generated signal: {signal}")
-
-            # Step 5: Apply trading rules to generate an order.
-            order = apply_trading_rules(signal, self.config)
-            self.logger.info(f"Initial order details: {order}")
-
-            # Step 6: If enabled, use a second model to predict optimal stop loss and take profit.
-            if self.config.stop_loss_model_enabled:
-                sl_tp = self.predict_stop_loss_take(processed_data)
-                order['stop_loss'] = sl_tp.get('stop_loss', order.get('stop_loss'))
-                order['take_profit'] = sl_tp.get('take_profit', order.get('take_profit'))
-                self.logger.info(f"Updated order with SL/TP: {order}")
-
-            # Step 7: Execute trade based on simulation or live mode.
-            trade_result = self.execute_trade(order)
-            self.logger.info(f"Trade executed: {trade_result}")
-
-            # Step 8: Analyze and visualize trading performance.
-            analysis_results = analyze_trades(trade_result)
-            visualize_trades(analysis_results)
-
+            goated_info_path = os.path.join(
+                trading_settings.goated_models_dir,
+                "goated_directional_accuracy",
+                "goated_directional_accuracy_info.json"
+            )
+            if os.path.exists(goated_info_path):
+                self.logger.info(f"Loading goated model info from {goated_info_path}")
+                with open(goated_info_path, 'r') as f:
+                    goated_info = json.load(f)
+                architecture = goated_info.get("architecture", [128, 64, 32])
+                model_name_from_json = goated_info.get("model_name", "")
+                dest_stage = goated_info.get("dest_stage", "")
+                self.logger.info(f"Goated info: model_name={model_name_from_json}, dest_stage={dest_stage}, architecture={architecture}")
+                # Remove redundant prefix if present:
+                prefix = f"models{os.sep}best_models"
+                if dest_stage.startswith(prefix):
+                    relative_path = dest_stage[len(prefix):].lstrip(os.sep)
+                else:
+                    relative_path = dest_stage
+                checkpoint_path = os.path.join(trading_settings.best_models_dir, relative_path, "best_model.pt")
+                self.logger.info(f"Resolved checkpoint path from goated info: {checkpoint_path}")
+            else:
+                self.logger.info("No goated model info found; falling back to default best model.")
+                architecture = [256, 128, 64]
+                checkpoint_path = os.path.join(trading_settings.best_models_dir, f"{self.ticker}_best_model.pt")
+                self.logger.info(f"Using fallback checkpoint path: {checkpoint_path}")
+            
+            # For prediction, input_size should match your training configuration.
+            # Here we assume the composite embedding plus any additional numeric features gives input_size=34.
+            input_size = 34
+            self.model = StockPredictor(input_size, architecture).to(torch.device("cpu"))
+            checkpoint = torch.load(checkpoint_path, map_location=torch.device("cpu"))
+            self.model.load_state_dict(checkpoint)
+            self.model.eval()
+            self.logger.info(f"Successfully loaded model from {checkpoint_path} with architecture {architecture}")
         except Exception as e:
-            self.logger.error(f"Error during trading session: {e}")
+            self.logger.error(f"Failed to load model: {e}")
+            self.model = None
 
-    def gather_data(self):
+    def process_and_predict(self, price_df: pd.DataFrame, news_df: pd.DataFrame, processed_array=None) -> float:
         """
-        Calls the data aggregation and processing pipelines to gather and process data.
+        Uses the processed numeric data to produce a prediction.
+        If processed_array is provided, it is used directly.
         """
-        self.logger.info("Gathering data via data aggregation pipeline.")
-        da_main.main()  # Execute data aggregation.
-        self.logger.info("Processing data via data processing pipeline.")
-        dp_main.main()  # Execute data processing.
-
-    def load_processed_data(self):
-        """
-        Loads the processed data.
-        Replace this with your actual data loading logic (e.g., using your DataHandler).
-        """
-        self.logger.info("Loading processed data.")
-        # For demonstration, return a dummy dictionary.
-        return {"dummy_key": "dummy_value"}
-
-    def predict(self, processed_data):
-        """
-        Aggregates predictions from multiple models to generate a weighted forecast.
+        self.logger.info(f"Received price_df with shape {price_df.shape}")
+        self.logger.info(f"Received news_df with shape {news_df.shape}")
         
-        :param processed_data: The data after processing.
-        :return: A weighted prediction value.
-        """
-        self.logger.info("Generating aggregated model prediction from multiple models.")
-        return self.predict_from_multiple_models(processed_data)
-
-    def predict_from_multiple_models(self, processed_data):
-        """
-        Dummy function to simulate predictions from multiple models.
-        Replace this with actual logic that retrieves predictions from your best models,
-        applies weights (giving higher weight to the best models and recent data), and returns
-        a weighted average.
+        if processed_array is not None and processed_array.size > 0:
+            self.logger.info("Using cached numeric data for prediction.")
+            features = prepare_features(processed_array)
+            if features is None or features.size == 0:
+                self.logger.warning("Prepared features are empty.")
+                return 0.0
+            # Use the last row for prediction
+            features_tensor = torch.tensor(features[-1:], dtype=torch.float32)
+            with torch.no_grad():
+                prediction = self.model(features_tensor).item()
+            self.logger.info(f"Predicted expected price fluctuation: {prediction:.4f}%")
+            return prediction
         
-        :param processed_data: The processed data.
-        :return: Weighted prediction (float between 0 and 1).
-        """
-        # Example: Dummy predictions and weights.
-        predictions = [0.65, 0.70, 0.60]
-        weights = [0.4, 0.35, 0.25]  # Sum should equal 1.
-        weighted_prediction = sum(p * w for p, w in zip(predictions, weights))
-        self.logger.info(f"Weighted prediction: {weighted_prediction}")
-        return weighted_prediction
+        self.logger.error("No processed numeric data provided; cannot predict.")
+        return 0.0
 
-    def predict_stop_loss_take(self, processed_data):
-        """
-        Dummy function to predict optimal stop loss and take profit levels.
-        Replace this with your actual model logic.
-        
-        :param processed_data: The processed data.
-        :return: A dictionary with 'stop_loss' and 'take_profit' percentages.
-        """
-        self.logger.info("Predicting optimal stop loss and take profit levels using secondary model.")
-        # For demonstration, return fixed values.
-        return {"stop_loss": 0.04, "take_profit": 0.12}
-
-    def execute_trade(self, order):
-        """
-        Executes the trade based on the order details.
-        In simulation mode, simply logs the trade.
-        In live mode, integrates with Interactive Brokers via the IB API.
-        
-        :param order: A dictionary representing the trade order.
-        :return: A dictionary representing the trade result.
-        """
-        if self.config.simulation_mode:
-            self.logger.info("Simulation mode enabled. Executing simulated trade.")
-            # Record simulated trade details (update a portfolio ledger in a real implementation).
-            return {"status": "simulated", "order": order}
-        else:
-            self.logger.info("Live trading mode enabled. Executing live trade via Interactive Brokers.")
-            try:
-                # Placeholder for Interactive Brokers integration.
-                # For a real implementation, consider using the 'ib_insync' library.
-                # Example:
-                # from ib_insync import IB, MarketOrder
-                # ib = IB()
-                # ib.connect(self.config.ib_api_host, self.config.ib_api_port, clientId=self.config.ib_client_id)
-                # market_order = MarketOrder(order['action'], order['trade_size'])
-                # trade = ib.placeOrder(self.config.ticker, market_order)
-                # ib.disconnect()
-                # return trade
-                self.logger.info("Connecting to Interactive Brokers (placeholder).")
-                # Simulate live trade execution result.
-                return {"status": "executed_live", "order": order}
-            except Exception as e:
-                self.logger.error(f"Error during live trade execution: {e}")
-                return {"status": "error", "error": str(e)}
+    def execute_trading_cycle(self, price_df: pd.DataFrame, news_df: pd.DataFrame, processed_array=None):
+        prediction = self.process_and_predict(price_df, news_df, processed_array)
+        decision, rationale = self.trading_rules.evaluate_trade(prediction)
+        self.logger.info(f"Trading Decision: {decision} | Rationale: {rationale}")
+        self.trade_simulator.execute_trade(decision, prediction, rationale)
+        return decision, prediction, rationale
 
 if __name__ == "__main__":
-    engine = TradingEngine()
-    engine.run()
+    import pandas as pd
+    engine = TradingEngine(ticker="NVDA", local_mode=True)
+    sample_price_path = os.path.join(trading_settings.data_storage_path, "raw", "NVDA_raw_price_2025-02-18.csv")
+    sample_news_path = os.path.join(trading_settings.data_storage_path, "raw", "NVDA_raw_news_2025-02-18.csv")
+    if os.path.exists(sample_price_path) and os.path.exists(sample_news_path):
+        price_df = pd.read_csv(sample_price_path)
+        news_df = pd.read_csv(sample_news_path)
+        engine.execute_trading_cycle(price_df, news_df)
+    else:
+        engine.logger.error("Sample raw data files not found for testing.")

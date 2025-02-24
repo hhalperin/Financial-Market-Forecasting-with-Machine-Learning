@@ -1,43 +1,43 @@
-# trading_config.py
-"""
-Trading Configuration Module
+# src/trading/trading_config.py
+from src.config import Settings  # Import base settings
 
-This module defines the TradingConfig class which extends the centralized configuration
-from src/config.py. It allows trading-specific overrides (e.g., ticker, date range) and
-adds parameters for simulation/live mode, Interactive Brokers integration, and additional
-machine learning settings for signal aggregation and risk management.
-"""
+class TradingSettings(Settings):  # Inherit from Settings
+    # -------------------------------
+    # Trading-Specific Configuration (Overrides)
+    # -------------------------------
+    initial_capital: float = 100000.0  # Starting balance for backtesting
+    commission: float = 0.001          # Commission per trade
+    slippage: float = 0.0005           # Slippage (fraction of price)
 
-from src.config import Settings  # Base configuration
-from pydantic_settings import BaseSettings
-from typing import Optional
+    # Backtesting Parameters (for historical data)
+    backtest_ticker: str = "NVDA"
+    backtest_start_date: str = "2025-01-02"
+    backtest_end_date: str = "2025-02-01"
+    interval: str = "1min"
+    outputsize: str = "full"
 
-class TradingConfig(Settings):
-    # Trading mode: True for simulation, False for live trading.
-    simulation_mode: bool = True
+    # Live Mode Settings
+    live_mode: bool = False          # Set to True for live data
+    live_days: int = 1               # How many days of data to use in live mode
 
-    # Interactive Brokers (IB) API parameters.
-    ib_api_host: str = "127.0.0.1"
-    ib_api_port: int = 7497
-    ib_client_id: int = 1
+    # Model Storage Paths (Ensures No Conflict With General Storage Paths)
+    best_models_dir: str = "./src/data/models/best_models"
+    goated_models_dir: str = "./src/data/models/goated_models"
 
-    # Parameters for aggregating predictions from multiple models.
-    # For example, if you have 5-10 best models for different time horizons.
-    number_of_best_models: int = 5
-    # Weight decay factor can be used to give more weight to the best models and recent data.
-    model_weight_decay: float = 0.8
+    # Trading-Specific Visualization Parameters
+    equity_curve_title: str = "Equity Curve"
+    drawdown_title: str = "Drawdowns"
+    trade_histogram_title: str = "Trade PnL Histogram"
+    histogram_bins: int = 20
 
-    # Flag to enable the second ML model for computing optimal stop loss and take profit.
-    stop_loss_model_enabled: bool = True
+    # Override conflicting storage paths to be trading-specific
+    data_storage_path: str = "./src/data/trading"
+    permanent_storage_path: str = "./permanent_storage/trading"
 
-    # Optionally override base configuration values for trading.
-    ticker: str = "HIMS"            # Trading ticker override.
-    start_date: str = "2025-01-01"    # Trading data start date.
-    end_date: str = "2025-02-01"      # Trading data end date.
-
+    # Ensure that trading-specific environment variables load correctly
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
 
-# Global trading configuration instance.
-trading_config = TradingConfig()
+# Global instance
+trading_settings = TradingSettings()
