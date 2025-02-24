@@ -1,0 +1,173 @@
+/* Basic Reset */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+  
+  body {
+    font-family: Arial, sans-serif;
+    color: #333;
+    background: #f9f9f9;
+  }
+  
+  /* Colors:
+     Primary: #003366 (dark blue)
+     Secondary: #0066CC (lighter blue)
+     Background: #f9f9f9 (off-white)
+     Text: #333 (dark gray)
+     Accents: #ccc (light gray)
+  */
+  
+  /* Site Header & Navigation */
+  .site-header {
+    background: #003366;
+    padding: 1em 0;
+  }
+  
+  .navbar {
+    width: 90%;
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  
+  .navbar .logo {
+    color: #fff;
+    font-size: 1.5em;
+    text-decoration: none;
+    font-weight: bold;
+  }
+  
+  .navbar .nav-links {
+    list-style: none;
+    display: flex;
+    gap: 1em;
+  }
+  
+  .navbar .nav-links a {
+    text-decoration: none;
+    color: #fff;
+    font-size: 1em;
+    padding: 0.5em 1em;
+    transition: background 0.3s;
+  }
+  
+  .navbar .nav-links a:hover {
+    background: #0066cc;
+    border-radius: 5px;
+  }
+  
+  /* Hero Section (Home) */
+  .hero {
+    background: linear-gradient(to bottom right, #003366, #0066cc);
+    color: #fff;
+    padding: 3em 0;
+    text-align: center;
+  }
+  
+  .hero-content {
+    width: 90%;
+    max-width: 600px;
+    margin: 0 auto;
+  }
+  
+  .hero h1 {
+    font-size: 2.5em;
+    margin-bottom: 0.5em;
+  }
+  
+  .hero p {
+    margin-bottom: 1.5em;
+    font-size: 1.2em;
+  }
+  
+  .cta-button {
+    background: #fff;
+    color: #003366;
+    text-decoration: none;
+    padding: 0.75em 1.5em;
+    border-radius: 5px;
+    font-weight: bold;
+  }
+  
+  .cta-button:hover {
+    background: #ccc;
+  }
+  
+  /* Intro/Home Sections */
+  .intro {
+    padding: 2em 0;
+  }
+  
+  .intro .container {
+    width: 90%;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  
+  .intro h2 {
+    font-size: 1.8em;
+    margin-bottom: 1em;
+    color: #003366;
+  }
+  
+  .intro p {
+    font-size: 1em;
+    line-height: 1.6em;
+  }
+  
+  /* Page Headers (For about, news, funds) */
+  .page-header {
+    background: #0066cc;
+    color: #fff;
+    padding: 2em 0;
+    text-align: center;
+    margin-bottom: 2em;
+  }
+  
+  .page-header h1 {
+    font-size: 2em;
+  }
+  
+  /* Content Sections */
+  .content-section {
+    padding: 2em 0;
+  }
+  
+  .content-section .container {
+    width: 90%;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  
+  .content-section h2 {
+    margin-bottom: 1em;
+    font-size: 1.5em;
+    color: #003366;
+  }
+  
+  .content-section p {
+    margin-bottom: 1em;
+    line-height: 1.6em;
+  }
+  
+  /* Footer */
+  .site-footer {
+    background: #003366;
+    color: #fff;
+    padding: 1em 0;
+    text-align: center;
+  }
+  
+  .footer-container {
+    width: 90%;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  
+  .footer-container p {
+    font-size: 0.9em;
+  }

@@ -5,10 +5,8 @@
 .venv/
 
 # Ignore data folder
-models/
 src/data/
 
 # Ignore vulnerable terraform files 
 *.tfstate*
 .terraform/
-terraform/
