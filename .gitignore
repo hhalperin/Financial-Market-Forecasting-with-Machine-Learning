@@ -7,8 +7,8 @@
 # Ignore data folder
 models/
 src/data/
-# Ignore quant-h2_website folder
-quant-h2_website/
 
-# Ignore terraform folder
+# Ignore vulnerable terraform files 
+*.tfstate*
+.terraform/
 terraform/
