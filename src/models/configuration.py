@@ -3,7 +3,7 @@ Configuration Module
 
 Defines the training configuration for model experiments using dataclasses.
 This module provides a structure to define different experiment setups.
-Additional fields can be added here, and defaults can be overridden via the centralized config.py.
+Additional fields can be added here, and defaults can be overridden via the centralized config.
 """
 
 from dataclasses import dataclass, field
@@ -26,7 +26,7 @@ class TrainingConfig:
 
     # Fluctuation filtering settings
     filter_fluctuation: bool = False
-    fluct_threshold: float = 1.0  # For example, remove rows with |target| < 1.0
+    fluct_threshold: float = 1.0  # e.g., remove rows with |target| < 1.0
 
     # Model training hyperparameters
     learning_rate: float = 0.001
@@ -37,7 +37,7 @@ class TrainingConfig:
 def get_experiment_configurations() -> List[TrainingConfig]:
     """
     Returns a list of TrainingConfig objects for different experiments.
-    These configurations are optional and can be used to run multiple training experiments.
+    These configurations can be used to run multiple training experiments.
     """
     return [
         TrainingConfig(
@@ -65,5 +65,5 @@ def get_experiment_configurations() -> List[TrainingConfig]:
             epochs=10,
             hidden_layers=[256, 128, 64]
         ),
-        # Additional configurations can be added as needed.
+        # Additional configurations can be added here.
     ]

@@ -1,3 +1,10 @@
+"""
+Utilities Module
+
+This module aggregates helper functions and classes used throughout the project,
+including data handling, logging, error management, data loading, and batch API operations.
+"""
+
 from .data_handler import DataHandler
 from .logger import get_logger
 from .error_handler import handle_api_errors

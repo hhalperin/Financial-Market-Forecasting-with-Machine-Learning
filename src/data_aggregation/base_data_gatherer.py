@@ -2,7 +2,8 @@
 Base Data Gatherer Module
 
 Provides the BaseDataGatherer class and helper functions to manage API key retrieval
-and to make HTTP requests with retry logic.
+and to make HTTP requests with retry logic. This module is intended to be the parent
+for specialized data gatherers. It also caches API keys to avoid redundant lookups.
 """
 
 import os
@@ -32,7 +33,7 @@ def get_cached_api_key(api_key_env_var: str, secret_name_env_var: str, local_mod
         return _CACHED_API_KEYS[key]
 
     if local_mode:
-        # In local mode, retrieve the API key directly from environment variables.
+        # Retrieve the API key directly from environment variables.
         value = os.getenv(api_key_env_var, "ALPHAVANTAGE_API_KEY")
     else:
         # In production, fetch the API key from AWS Secrets Manager.
@@ -50,14 +51,14 @@ def get_cached_api_key(api_key_env_var: str, secret_name_env_var: str, local_mod
 class BaseDataGatherer:
     """
     Base class for data gatherers. Provides common functionality such as API key retrieval
-    and making API requests with retry logic.
+    and making HTTP requests with retry logic. Subclasses should override the run() method.
     """
 
     def __init__(self, ticker: str, local_mode: bool = False,
                  api_key_env_var: str = "ALPHAVANTAGE_API_KEY",
                  secret_name_env_var: str = "ALPHAVANTAGE_SECRET_NAME") -> None:
         """
-        Initializes the data gatherer with the required API credentials and a persistent HTTP session.
+        Initializes the data gatherer with required API credentials and a persistent HTTP session.
 
         :param ticker: Stock ticker symbol.
         :param local_mode: Flag to indicate local mode (for API key retrieval).
@@ -79,8 +80,9 @@ class BaseDataGatherer:
         :param url: The full URL for the API request.
         :param headers: Optional HTTP headers for the request.
         :return: The JSON response as a dictionary.
+        :raises: HTTPError if the request fails.
         """
-        # self.logger.info(f"Making API request: {url}")
+        #self.logger.debug(f"Making API request: {url}")
         response = self.session.get(url, headers=headers)
         response.raise_for_status()
         return response.json()

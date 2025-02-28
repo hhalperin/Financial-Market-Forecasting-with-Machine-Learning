@@ -31,6 +31,8 @@ class MarketAnalyzer:
         If use_chunking is True, processes the DataFrame in chunks to reduce peak memory usage,
         but with additional overhead.
         
+        The computed values are rounded to 4 decimal places and cast to float32.
+        
         :param max_gather_minutes: Maximum horizon in minutes.
         :param step: Step interval in minutes.
         :param use_chunking: Whether to process the DataFrame in chunks.
@@ -50,7 +52,9 @@ class MarketAnalyzer:
             new_columns = {}
             for minutes in tqdm(range(step, max_gather_minutes + 1, step), desc="Calculating Price Fluctuations"):
                 shifted_close = self.data_df['Close'].shift(-minutes)
-                new_columns[f"{minutes}_minutes_percentage_change"] = ((shifted_close - self.data_df['Close']) / self.data_df['Close'] * 100)
+                # Compute percentage change, round to 4 decimals, and cast to float32.
+                pct_change = ((shifted_close - self.data_df['Close']) / self.data_df['Close'] * 100)
+                new_columns[f"{minutes}_minutes_percentage_change"] = np.round(pct_change, 4).astype(np.float32)
             fluct_df = pd.DataFrame(new_columns, index=self.data_df.index)
             self.data_df = pd.concat([self.data_df, fluct_df], axis=1)
         else:
@@ -65,9 +69,9 @@ class MarketAnalyzer:
                 for start in range(0, total_rows, chunk_size):
                     end = min(start + chunk_size, total_rows)
                     idx = self.data_df.index[start:end]
-                    self.data_df.loc[idx, col_name] = (
-                        (shifted_series.loc[idx] - self.data_df.loc[idx, 'Close']) / self.data_df.loc[idx, 'Close'] * 100
-                    )
+                    computed_values = ((shifted_series.loc[idx] - self.data_df.loc[idx, 'Close']) / self.data_df.loc[idx, 'Close'] * 100)
+                    # Round to 4 decimals and cast to float32.
+                    self.data_df.loc[idx, col_name] = np.round(computed_values, 4).astype(np.float32)
                     del idx
                     gc.collect()
                 del shifted_series
@@ -81,6 +85,7 @@ class MarketAnalyzer:
     def calculate_technical_indicators(self) -> pd.DataFrame:
         """
         Computes RSI, MACD, and rate-of-change (ROC) indicators for the price data.
+        The computed values are rounded to 4 decimals and cast to float32.
         
         :return: DataFrame with technical indicator columns added.
         """
@@ -97,13 +102,13 @@ class MarketAnalyzer:
         rsi_roc = pd.Series(rsi).diff().fillna(0)
         macd_signal_roc = pd.Series(macd_signal).diff().fillna(0)
 
-        # In-place assignment of technical indicator columns.
-        self.data_df['RSI'] = rsi
-        self.data_df['MACD'] = macd
-        self.data_df['MACD_Signal'] = macd_signal
-        self.data_df['MACD_Hist'] = macd_hist
-        self.data_df['RSI_roc'] = rsi_roc
-        self.data_df['MACD_Signal_roc'] = macd_signal_roc
+        # In-place assignment of technical indicator columns, rounded to 4 decimals.
+        self.data_df['RSI'] = np.round(rsi, 4).astype(np.float32)
+        self.data_df['MACD'] = np.round(macd, 4).astype(np.float32)
+        self.data_df['MACD_Signal'] = np.round(macd_signal, 4).astype(np.float32)
+        self.data_df['MACD_Hist'] = np.round(macd_hist, 4).astype(np.float32)
+        self.data_df['RSI_roc'] = np.round(rsi_roc, 4).astype(np.float32)
+        self.data_df['MACD_Signal_roc'] = np.round(macd_signal_roc, 4).astype(np.float32)
 
         del rsi, macd, macd_signal, macd_hist, rsi_roc, macd_signal_roc
         gc.collect()

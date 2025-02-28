@@ -51,7 +51,7 @@ def main() -> None:
     logger.info(f"Loaded news_df: shape={news_df.shape}, columns={list(news_df.columns)}")
 
     if price_df.empty or "DateTime" not in price_df.columns:
-        logger.error("'DateTime' column missing or price_df is empty. Check aggregator output.")
+        raise ValueError("'DateTime' column missing or price_df is empty.")
         return
     if news_df.empty or "time_published" not in news_df.columns:
         logger.error("'time_published' column missing or news_df is empty. Check aggregator output.")
@@ -69,8 +69,9 @@ def main() -> None:
     # Generate a list of time horizons based on the maximum gather minutes
     time_horizons = [
         {"target_name": f"{m}_minutes", "time_horizon": timedelta(minutes=m)}
-        for m in range(5, max_gather_minutes + 1, 5)
+        for m in range(2, max_gather_minutes + 1, 2)
     ]
+
     processed_df = processor.process_pipeline(time_horizons)
     #logger.info(f"Final processed DataFrame (raw): shape={processed_df.shape}, columns={list(processed_df.columns)}")
     #logger.info(f"Numeric DataFrame for training: shape={processor.numeric_df.shape}, columns={list(processor.numeric_df.columns)}")

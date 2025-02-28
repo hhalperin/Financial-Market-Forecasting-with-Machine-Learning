@@ -1,3 +1,10 @@
+"""
+Performance Monitor Module
+
+Provides a decorator to measure function execution time and log a warning if it exceeds
+a specified threshold.
+"""
+
 import time
 import logging
 from functools import wraps
@@ -9,7 +16,8 @@ def profile_time(threshold: float = 0.5):
     Decorator to measure the execution time of a function.
     Logs a warning if the function takes longer than 'threshold' seconds.
     
-    :param threshold: Maximum acceptable execution time in seconds before logging a warning.
+    :param threshold: Maximum acceptable execution time (in seconds) before logging a warning.
+    :return: Decorated function with execution time profiling.
     """
     def decorator(func):
         @wraps(func)

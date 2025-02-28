@@ -1,168 +1,237 @@
-# Stock Data Aggregation, Processing, and Trading System
+Financial Market Forecasting with Machine Learning
 
-## Overview
+This project aims to forecast financial market trends using machine learning techniques. It involves gathering data from various sources (e.g., news and stock prices), processing and preparing the data, training machine learning models to predict market trends, and (in progress) implementing trading strategies based on those predictions.
 
-This project is a comprehensive system for collecting, processing, modeling, and eventually simulating live trading based on stock market data. The system is designed to:
+The project is organized into several directories, each handling a specific part of the workflow, from data aggregation to model training and trading.
 
-- **Aggregate Data:** Fetch intraday stock price data and related news articles from the Alpha Vantage API.
-- **Process Data:** Clean, merge, and transform the aggregated data—generating market features, sentiment scores, and text embeddings.
-- **Model Training & Evaluation:** Train multiple neural network models to predict stock price fluctuations using various time horizons.
-- **Trading Simulation:** Aggregate real-time data and, using pre-trained models along with configurable trading rules, simulate trades and test strategy performance.
+Table of Contents
 
-## Directory Structure
+Installation
 
-```bash
-project-root/
-│
-├── data_aggregation/
-│   ├── __init__.py
-│   ├── base_data_gatherer.py
-│   ├── data_aggregator.py
-│   ├── news_data_gatherer.py
-│   └── stock_price_data_gatherer.py
-│
-├── data_processing/
-│   ├── __init__.py
-│   ├── data_processing.py
-│   ├── data_embedder.py
-│   ├── sentiment_processor.py
-│   ├── market_analyzer.py
-│   └── time_horizon_manager.py
-│
-├── models/
-│   ├── __init__.py
-│   ├── stock_predictor.py
-│   ├── model_manager.py
-│   ├── model_analysis.py
-│   ├── model_pipeline.py
-│   └── configuration.py
-│
-├── trading/
-│   ├── __init__.py
-│   ├── trading_config.py   # Trading-specific configuration (extends base settings)
-│   ├── live_data_collector.py  # Continuously polls for live data
-│   ├── trading_engine.py        # Orchestrates live data processing and trading decisions
-│   ├── trading_rules.py         # Contains rule-based trading logic
-│   ├── trade_simulator.py       # Simulates trades based on model predictions
-│   └── dashboard.py             # (Future) Secure live dashboard for monitoring trades
-│
-└── utils/
-    ├── data_handler.py
-    ├── data_loader.py
-    ├── error_handler.py
-    ├── logger.py
-    └── performance_monitor.py
-```
+Usage
 
-## Configuration
+Directory Structure
 
-The system uses a centralized configuration file (`src/config.py`) based on Pydantic’s `BaseSettings` to load parameters from environment variables (via a `.env` file). For trading-specific settings, a new file—`trading/trading_config.py`—extends these settings to include parameters such as:
+quant-h2_website
 
-- **Initial Capital:** Starting balance for backtesting.
-- **Commission & Slippage:** Costs per trade.
-- **Live Mode Toggles:** Enable or disable live data collection.
-- **Live Data Days:** Number of days of live data to use.
-- **Storage Paths:** Trading-specific paths to avoid conflicts with other modules.
-- **Visualization Parameters:** Titles for equity curve, drawdowns, and trade histograms.
+src
 
-Make sure to create a `.env` file in the project root with the necessary API keys and any custom settings.
+data
 
-## Installation
+data_aggregation
 
-1. **Clone the Repository:**
-   ```bash
-   git clone https://github.com/yourusername/your-repo.git
-   cd your-repo
-   ```
+data_processing
 
-2. **Create a Virtual Environment:**
-   ```bash
-   python -m venv venv
-   source venv/bin/activate   # On Windows use: venv\Scripts\activate
-   ```
+models
 
-3. **Install Dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-   (Ensure your requirements.txt includes packages such as pydantic_settings, requests, boto3, tenacity, pandas, numpy, talib, torch, transformers, scikit-learn, etc.)
+trading (WIP)
 
-## Running the System
+utils
 
-### 1. Data Aggregation
+Contributing
 
-To fetch historical price and news data:
+License
 
-```bash
-python src/main.py
-```
+Installation
 
-This script loads configuration, aggregates data using modules in `data_aggregation/`, and stores the results locally or in a database.
+To set up the project, ensure you have Python installed. Then, install the required dependencies:
 
-### 2. Data Processing
+pip install -r src/requirements.txt
 
-To clean, merge, and enrich the aggregated data:
+You may also need to configure API keys or other settings in src/config.py before running the scripts.
 
-```bash
-python src/data_processing/main.py
-```
+Usage
 
-This step produces preprocessed and numeric data for model training.
+The project is modular, with each component having its own entry point:
 
-### 3. Model Training & Evaluation
+Data Aggregation: Run src/data_aggregation/main.py to collect data from various sources.
 
-To train your stock prediction models across various time horizons:
+Data Processing: Run src/data_processing/main.py to process and prepare the data for modeling.
 
-```bash
-python src/models/main.py
-```
+Model Training: Run src/models/main.py to train and evaluate the machine learning models.
 
-This module trains multiple models, evaluates them, and optionally performs hyperparameter optimization using Optuna.
+Trading (WIP): The trading functionality is under development; check src/trading/main.py for current capabilities.
 
-### 4. Trading Simulation (Live Trading)
+Ensure src/config.py is properly configured with necessary settings (e.g., API keys, file paths) before execution.
 
-**Live Data Collector**
+Directory Structure
 
-The new `live_data_collector.py` module (located in `trading/`) wraps the data aggregation code in a continuous loop. It is designed to:
+Here’s an overview of the project’s structure, with detailed breakdowns below:
 
-- **Before Market Open:** Poll and fetch all after-hours data at market open.
-- **During Market Hours:** Poll live data every minute (trading occurs only during market hours).
+quant-h2_website/: Files for deploying a project-related website.
 
-**Starting the Trading Engine**
+src/: Main source code directory containing all core functionality.
 
-Once the live data collector is running, the trading engine (in `trading/trading_engine.py`) processes the new data, applies your trading rules (defined in `trading/trading_rules.py`), and simulates trade executions via the trade simulator (`trading/trade_simulator.py`).
+data/: Stores datasets and trained models.
 
-To start the live trading simulation, set the `live_mode` boolean to `True` in your `trading/trading_config.py` and run:
+data_aggregation/: Gathers data from external sources.
 
-```bash
-python src/trading/live_data_collector.py
-```
+data_processing/: Prepares data for modeling.
 
-(Depending on your final integration, the trading engine might be invoked from within the live data collector or as a separate process.)
+models/: Defines and manages machine learning models.
 
-### 5. Dashboard (Future)
+trading/: In-progress trading functionality.
 
-A secure, password-protected dashboard (using Flask, Django, or Streamlit) is planned to provide a live view of:
+utils/: Shared utility functions.
 
-- Stock price charts.
-- Expected price fluctuation graphs.
-- Trade logs and performance metrics.
+quant-h2_website
 
-## Future Enhancements
+This directory contains files for deploying a website related to the project.
 
-- **Data Storage:** Migrate from local CSV/SQLite to cloud-based databases as data volume increases.
-- **Advanced Trading Rules:** Start with simple threshold-based rules and evolve toward more complex, adaptive strategies (e.g., dynamic stop-loss or neural network-based parameter prediction).
-- **Dashboard Integration:** Build a secure web dashboard for real-time monitoring and control.
-- **Automated Model Updates:** Implement automated retraining using the most recent data during live trading.
-- **Enhanced Error Handling & Alerts:** Improve error handling and logging, and add real-time alerts for critical system failures.
+terraform/: Infrastructure-as-code files for website deployment.
 
-## Contributing
+files/: Contains HTML and CSS files for the website frontend.
 
-Contributions are welcome! Please feel free to submit issues or pull requests to help improve the project.
+Terraform files: Configuration files for managing infrastructure (e.g., AWS, GCP) using Terraform.
 
-## License
+src
+
+The root of the source code, containing configuration and requirements:
+
+__init__.py: Marks src/ as a Python package.
+
+config.py: Central configuration file for the project (e.g., API keys, paths).
+
+requirements.txt: Lists Python dependencies.
+
+data
+
+Stores data and models used in the project.
+
+models/: Saved machine learning models.
+
+news/: Raw news data collected for sentiment analysis.
+
+numeric/: Numeric data (e.g., financial metrics).
+
+preprocessed/: Processed data ready for modeling.
+
+price/: Stock price data.
+
+data_aggregation
+
+This module is responsible for gathering and aggregating stock price and news data from the Alpha Vantage API. It provides a suite of classes to fetch data concurrently using threading for improved performance, manage API interactions with retry logic, and store data persistently in either local CSV files or an SQLite database.
+
+__init__.py: Initializes the data_aggregation package and exports key classes.
+
+base_data_gatherer.py: Provides the foundation for data gathering operations.
+
+data_aggregator.py: Manages the aggregation of stock price and news data.
+
+news_data_gatherer.py: Fetches news articles from Alpha Vantage.
+
+stock_price_data_gatherer.py: Retrieves intraday stock price data from Alpha Vantage.
+
+data_storage.py: Manages persistent storage of aggregated data.
+
+main.py: The entry point for the data aggregation process.
+
+data_processing
+
+Processes and prepares data for use in machine learning models.
+
+__init__.py: Marks this as a Python package.
+
+data_processing.py: Core data processing functions (e.g., cleaning, normalization).
+
+data_embedder.py: Converts data (e.g., text) into embeddings or numeric representations.
+
+main.py: Entry point to process data.
+
+sentiment_processor.py: Analyzes sentiment from news or text data.
+
+market_analyzer.py: Extracts insights from market data.
+
+time_horizon_manager.py: Aligns data across different forecasting timeframes.
+
+models
+
+Defines and manages the machine learning models for market forecasting.
+
+__init__.py: Marks this as a Python package.
+
+cpu_optimization.py: Optimizes model performance for CPU execution.
+
+stock_predictor.py: Core model for predicting stock prices or trends.
+
+model_manager.py: Handles model training, saving, and loading.
+
+main.py: Entry point for training and evaluating models.
+
+model_analysis.py: Evaluates model performance (e.g., metrics, visualizations).
+
+model_pipeline.py: Defines the end-to-end modeling pipeline.
+
+model_summary.py: Generates summaries of model architecture or results.
+
+configuration.py: Model-specific configuration settings.
+
+Contributing
+
+Contributions are welcome! Please open an issue or submit a pull request on GitHub for bug fixes, improvements, or new features.
+
+License
 
 This project is licensed under the MIT License.
 
-For any questions or further clarifications, please open an issue in the repository or contact the maintainers.
+#### data_aggregation
 
+This module is responsible for gathering and aggregating stock price and news data from the Alpha Vantage API. It provides a suite of classes to fetch data concurrently using threading for improved performance, manage API interactions with retry logic, and store data persistently in either local CSV files or an SQLite database.
+
+<details>
+<summary>Files in data_aggregation</summary>
+
+- **`__init__.py`**: Initializes the `data_aggregation` package and exports key classes:
+  - `DataAggregator`
+  - `NewsDataGatherer`
+  - `StockPriceDataGatherer`
+  - `BaseDataGatherer`
+
+- **`base_data_gatherer.py`**: Provides the foundation for data gathering operations.
+  - **Classes/Functions**:
+    - `BaseDataGatherer`: A base class for specialized data gatherers, handling API key retrieval (from environment variables or AWS Secrets Manager) and HTTP requests with retry logic using a persistent `requests.Session`.
+    - `get_cached_api_key`: Caches and retrieves API keys to avoid redundant lookups.
+  - **Key Features**: Supports local and production modes, uses `tenacity` for retries, and logs operations.
+
+- **`data_aggregator.py`**: Manages the aggregation of stock price and news data.
+  - **Class**: `DataAggregator`
+    - Aggregates data concurrently using `ThreadPoolExecutor` for performance.
+    - Coordinates `StockPriceDataGatherer` and `NewsDataGatherer` to fetch data.
+  - **Key Features**: Supports custom intervals (e.g., "1min") and optional data handlers for further processing.
+
+- **`news_data_gatherer.py`**: Fetches news articles from Alpha Vantage.
+  - **Class**: `NewsDataGatherer` (inherits from `BaseDataGatherer`)
+    - Splits date ranges into yearly chunks to manage API limits.
+    - Returns a `pandas.DataFrame` with news data (e.g., title, summary, URL).
+  - **Key Features**: Handles large date ranges, deduplicates articles, and drops incomplete records.
+
+- **`stock_price_data_gatherer.py`**: Retrieves intraday stock price data from Alpha Vantage.
+  - **Class**: `StockPriceDataGatherer` (inherits from `BaseDataGatherer`)
+    - Splits date ranges into monthly chunks for efficient API calls.
+    - Returns a `pandas.DataFrame` with price data (e.g., Open, High, Low, Close, Volume).
+  - **Key Features**: Supports configurable intervals, ensures data consistency, and suggests Parquet for large datasets.
+
+- **`data_storage.py`**: Manages persistent storage of aggregated data.
+  - **Class**: `DataStorage`
+    - Supports two modes: "local" (CSV files) and "db" (SQLite database).
+    - Provides methods: `save_data`, `load_data`, `update_data`, `delete_data`.
+  - **Key Features**: Initializes database tables, handles data merging, and supports flexible storage paths.
+  - **Usage in Main**: Integrates with `DataAggregator` to avoid redundant API calls by loading stored data first.
+
+- **`main.py`**: The entry point for the data aggregation process.
+  - **Functions**:
+    - `main`: Orchestrates configuration loading, data handler setup, aggregation, and storage.
+    - `load_config`: Loads settings from `Settings` (e.g., ticker, dates, mode).
+    - `setup_data_handler`: Configures `DataHandler` for local or S3 storage.
+    - `setup_aggregator`: Initializes `DataAggregator`.
+  - **Key Features**: Supports local and S3 storage modes, logs progress, and saves data as CSV files.
+
+</details>
+
+**Usage**: To run the data aggregation process, execute `src/data_aggregation/main.py`. Ensure `src/config.py` is configured with required settings (e.g., API keys, ticker, date ranges). The script checks for existing data in storage and fetches fresh data from the API if needed.
+
+**Dependencies**: 
+- Standard libraries: `os`, `json`, `time`
+- External libraries: `pandas`, `requests`, `boto3`, `sqlite3`, `tenacity`, `python-dotenv`
+
+**Data Source**: For more details on the API, refer to the [Alpha Vantage API documentation](https://www.alphavantage.co/documentation/).

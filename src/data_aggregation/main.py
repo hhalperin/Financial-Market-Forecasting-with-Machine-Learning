@@ -78,7 +78,7 @@ def main() -> None:
     """
     logger.info("[MAIN] Loading configuration...")
     config = load_config()
-    logger.info(f"[MAIN] Configuration loaded: {config}")
+    #logger.info(f"[MAIN] Configuration loaded: {config}")
 
     data_handler = setup_data_handler(config)
     aggregator = setup_aggregator(config, data_handler)

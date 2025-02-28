@@ -2,7 +2,7 @@
 Data Aggregator Module
 
 Aggregates intraday stock price data and news articles for a given ticker and date range.
-Utilizes threading to fetch data concurrently.
+Uses threading to fetch data concurrently for improved performance.
 """
 
 import time
@@ -22,15 +22,15 @@ class DataAggregator:
     """
 
     def __init__(self, ticker: str, start_date: str, end_date: str,
-                 interval: str = '1min', data_handler=None, local_mode: bool = False) -> None:
+                 interval: str = "1min", data_handler=None, local_mode: bool = False) -> None:
         """
         Initializes the DataAggregator with parameters for data retrieval.
 
         :param ticker: Stock ticker symbol.
         :param start_date: Start date in 'YYYY-MM-DD' format.
         :param end_date: End date in 'YYYY-MM-DD' format.
-        :param interval: Interval for intraday data (default is '1min').
-        :param data_handler: An optional data handler for saving or further processing the data.
+        :param interval: Interval for intraday data.
+        :param data_handler: Optional data handler for saving or further processing.
         :param local_mode: Flag to indicate if the application runs in local mode.
         """
         self.ticker: str = ticker
@@ -42,9 +42,9 @@ class DataAggregator:
 
     def _fetch_price_data(self) -> pd.DataFrame:
         """
-        Fetches intraday price data using the StockPriceDataGatherer.
+        Fetches intraday price data using StockPriceDataGatherer.
 
-        :return: DataFrame containing the stock price data.
+        :return: DataFrame containing stock price data.
         """
         gatherer = StockPriceDataGatherer(
             ticker=self.ticker,
@@ -57,10 +57,11 @@ class DataAggregator:
 
     def _fetch_news_data(self) -> pd.DataFrame:
         """
-        Fetches news data using the NewsDataGatherer.
+        Fetches news data using NewsDataGatherer.
 
-        :return: DataFrame containing the news data.
+        :return: DataFrame containing news articles.
         """
+        from src.data_aggregation.news_data_gatherer import NewsDataGatherer
         gatherer = NewsDataGatherer(
             ticker=self.ticker,
             start_date=self.start_date,
@@ -72,8 +73,9 @@ class DataAggregator:
     def aggregate_data(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
         Concurrently fetches price and news data.
+        (Future improvement: Consider asynchronous I/O if API calls become rate limited.)
 
-        :return: A tuple containing two DataFrames: (price_data, news_data).
+        :return: Tuple containing (price_data, news_data) DataFrames.
         """
         start_time = time.time()
         with ThreadPoolExecutor(max_workers=2) as executor:

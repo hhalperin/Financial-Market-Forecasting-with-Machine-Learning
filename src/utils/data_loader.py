@@ -1,10 +1,20 @@
+"""
+Data Loader Module
+
+Provides a helper function to create a PyTorch DataLoader from input features and target labels.
+"""
+
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 from typing import Union
 import numpy as np
 
-def get_data_loader(X: Union[np.ndarray, torch.Tensor], y: Union[np.ndarray, torch.Tensor],
-                    batch_size: int = 32, shuffle: bool = True) -> DataLoader:
+def get_data_loader(
+    X: Union[np.ndarray, torch.Tensor],
+    y: Union[np.ndarray, torch.Tensor],
+    batch_size: int = 32,
+    shuffle: bool = True
+) -> DataLoader:
     """
     Creates a DataLoader from input features and target labels.
     

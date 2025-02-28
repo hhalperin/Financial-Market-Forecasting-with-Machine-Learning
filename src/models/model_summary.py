@@ -9,106 +9,156 @@ from typing import Any, List, Dict
 from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import precision_score, recall_score, f1_score
 from src.utils.logger import get_logger
-from .model_analysis import ModelAnalysis  # Assuming this is where your analysis code lives.
+from .model_analysis import ModelAnalysis
+from src.config import settings
 
 class ModelSummary:
     def __init__(self, data_handler):
         """
-        Responsible for managing model summary logic, tracking global 'goated' (best) models,
-        and computing any additional metrics you want to include.
+        Manages model summary logic, tracks global best models, and computes additional metrics.
+        
+        :param data_handler: DataHandler instance.
         """
         self.data_handler = data_handler
         self.logger = get_logger(self.__class__.__name__)
 
-        # Global best for standard metrics.
         self.global_best_mse = float("inf")
         self.global_best_info_mse = None
-
         self.global_best_mae = float("inf")
         self.global_best_info_mae = None
-
         self.global_best_r2 = -float("inf")
         self.global_best_info_r2 = None
-
         self.global_best_lobf = float("inf")
         self.global_best_info_lobf = None
 
-        # Additional suggested metrics:
         self.global_best_pearson = -float("inf")
         self.global_best_info_pearson = None
-
         self.global_best_spearman = -float("inf")
         self.global_best_info_spearman = None
-
         self.global_best_precision = -float("inf")
         self.global_best_info_precision = None
-
         self.global_best_recall = -float("inf")
         self.global_best_info_recall = None
-
         self.global_best_f1 = -float("inf")
         self.global_best_info_f1 = None
-
         self.global_best_median_ae = float("inf")
         self.global_best_info_median_ae = None
-
         self.global_best_median_ape = float("inf")
         self.global_best_info_median_ape = None
-
         self.global_best_sharpe = -float("inf")
         self.global_best_info_sharpe = None
 
-        # New global best fields for additional metrics:
         self.global_best_explained_variance = -float("inf")
         self.global_best_info_explained_variance = None
-
         self.global_best_mape = float("inf")
         self.global_best_info_mape = None
-
         self.global_best_regression_accuracy = -float("inf")
         self.global_best_info_regression_accuracy = None
-
         self.global_best_directional_accuracy = -float("inf")
         self.global_best_info_directional_accuracy = None
-
         self.global_best_percentage_over_prediction = float("inf")
         self.global_best_info_percentage_over_prediction = None
 
     def save_individual_model_summary(
         self,
-        dest_dir: str,
         candidate_model_name: str,
         gather: str,
         predict: str,
         candidate_summaries: List[Dict[str, Any]],
         best_candidate: Dict[str, Any]
     ) -> None:
+        """
+        Saves a JSON summary for a given prediction horizon.
+        
+        :param candidate_model_name: Candidate model name.
+        :param gather: Gather horizon string.
+        :param predict: Prediction horizon string.
+        :param candidate_summaries: List of candidate summaries.
+        :param best_candidate: Best candidate summary.
+        """
+        base_goated_dir = os.path.join(self.data_handler.base_data_dir, "models", "goated_models")
+        os.makedirs(base_goated_dir, exist_ok=True)
+        predict_folder = predict
+        target_dir = os.path.join(base_goated_dir, predict_folder)
+        new_metric = best_candidate.get("metrics", {}).get("line_of_best_fit_error")
+        if new_metric is None:
+            self.logger.error("New candidate lacks a valid line_of_best_fit_error metric. Not saving summary.")
+            return
+
+        existing_folders = [d for d in os.listdir(base_goated_dir) if os.path.isdir(os.path.join(base_goated_dir, d))]
+        if predict_folder in existing_folders:
+            summary_file = os.path.join(target_dir, "model_summary.json")
+            if os.path.exists(summary_file):
+                try:
+                    with open(summary_file, "r") as f:
+                        existing_summary = json.load(f)
+                    existing_metric = existing_summary.get("selected_best", {}).get("metrics", {}).get("line_of_best_fit_error")
+                    if existing_metric is not None and new_metric < existing_metric:
+                        self.logger.info(f"Updating folder '{predict_folder}': new metric {new_metric:.4f} is better than {existing_metric:.4f}")
+                    else:
+                        self.logger.info(f"Candidate not better than existing model in '{predict_folder}'. Skipping save.")
+                        return
+                except Exception as e:
+                    self.logger.error(f"Error reading summary for '{predict_folder}': {e}")
+        else:
+            if len(existing_folders) >= 5:
+                worst_folder = None
+                worst_metric = None
+                for folder in existing_folders:
+                    folder_path = os.path.join(base_goated_dir, folder)
+                    summary_file = os.path.join(folder_path, "model_summary.json")
+                    if os.path.exists(summary_file):
+                        try:
+                            with open(summary_file, "r") as f:
+                                summary_data = json.load(f)
+                            metric_val = summary_data.get("selected_best", {}).get("metrics", {}).get("line_of_best_fit_error")
+                            if metric_val is not None:
+                                if worst_metric is None or metric_val > worst_metric:
+                                    worst_metric = metric_val
+                                    worst_folder = folder
+                        except Exception as e:
+                            self.logger.error(f"Error reading summary for folder '{folder}': {e}")
+                if worst_folder is not None and new_metric < worst_metric:
+                    worst_folder_path = os.path.join(base_goated_dir, worst_folder)
+                    try:
+                        shutil.rmtree(worst_folder_path)
+                        self.logger.info(f"Removed worst predict horizon folder '{worst_folder}' with metric {worst_metric:.4f}")
+                    except Exception as e:
+                        self.logger.error(f"Failed to remove worst folder '{worst_folder}': {e}")
+                else:
+                    self.logger.info(f"New predict horizon '{predict_folder}' not better than existing worst. Skipping save.")
+                    return
+
+        os.makedirs(target_dir, exist_ok=True)
         summary = {
             "time_horizon": {"gather": gather, "predict": predict},
             "candidates": candidate_summaries,
             "selected_best": best_candidate,
             "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
         }
-        summary_filename = f"{candidate_model_name}_model_summary.json"
-        rel_stage = os.path.dirname(os.path.relpath(dest_dir, self.data_handler.base_data_dir))
-        self.data_handler.save_json(summary, summary_filename, stage=rel_stage)
-        self.logger.info(f"Saved model summary JSON at {os.path.join(dest_dir, summary_filename)}")
+        summary_path = os.path.join(target_dir, "model_summary.json")
+        try:
+            with open(summary_path, "w") as f:
+                json.dump(summary, f, indent=4)
+            self.logger.info(f"Saved model summary for predict horizon '{predict_folder}' at {summary_path}")
+        except Exception as e:
+            self.logger.error(f"Error saving model summary for '{predict_folder}': {e}")
 
     def update_goated_model_metric(self, metric_name: str, best_info: dict) -> None:
         """
-        If a new global best is found, copy the best model files into a 'goated_models/goated_{metric_name}' folder.
-        This version now copies both plot files (.png) and the model weight file (.pt) from the best_models folder.
+        Updates global best metrics by copying best model files into a goated_models folder.
+        
+        :param metric_name: Name of the metric.
+        :param best_info: Dictionary with best model information.
         """
         dest_relative = os.path.join("models", "goated_models", f"goated_{metric_name}")
         dest_dir = os.path.abspath(os.path.join(self.data_handler.base_data_dir, dest_relative))
         if os.path.exists(dest_dir):
             try:
                 shutil.rmtree(dest_dir)
-                self.logger.info(f"Cleared existing goated {metric_name} folder at {dest_dir}")
             except Exception as e:
                 self.logger.error(f"Failed to clear goated {metric_name} folder: {e}")
         os.makedirs(dest_dir, exist_ok=True)
-
         source_dir = os.path.abspath(self._resolve_local_path(best_info["dest_stage"]))
         try:
             for file in os.listdir(source_dir):
@@ -116,22 +166,26 @@ class ModelSummary:
                     src_file = os.path.join(source_dir, file)
                     dest_file = os.path.join(dest_dir, file)
                     shutil.copy2(src_file, dest_file)
-            self.logger.info(
-                f"Updated goated {metric_name} model: {best_info['model_name']} with {metric_name} value: {best_info['metrics'].get(metric_name)}"
-            )
         except Exception as e:
             self.logger.error(f"Failed to copy files for goated {metric_name} model: {e}")
-
         details_filename = f"goated_{metric_name}_info.json"
         self.data_handler.save_json(best_info, details_filename, stage=dest_relative)
         self.logger.info(f"Saved goated {metric_name} info to {details_filename}")
 
-    def save_summary(self, results: list) -> None:
+    def save_summary_table(self, results: list) -> None:
+        """
+        Saves the training summary table.
+        
+        :param results: List of training results.
+        """
         analysis = ModelAnalysis(self.data_handler, model_stage="models")
         analysis.save_summary_table(results)
         self.logger.info("Training summary table saved.")
 
     def clear_memory(self) -> None:
+        """
+        Clears memory by closing figures, garbage collecting, and emptying CUDA cache if available.
+        """
         plt.close('all')
         gc.collect()
         if torch.cuda.is_available():
@@ -141,10 +195,8 @@ class ModelSummary:
     def calculate_directional_accuracy(self, predictions, actuals):
         if len(predictions) == 0:
             return None
-        correct_directions = 0
-        for pred, act in zip(predictions, actuals):
-            if (pred >= 0 and act >= 0) or (pred < 0 and act < 0):
-                correct_directions += 1
+        correct_directions = sum(1 for pred, act in zip(predictions, actuals)
+                                 if (pred >= 0 and act >= 0) or (pred < 0 and act < 0))
         return correct_directions / len(predictions)
 
     def calculate_percentage_over_prediction(self, predictions, actuals):
